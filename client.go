@@ -650,6 +650,14 @@ func (s *Client) LiquidityConfig(ctx context.Context,
 	return s.manager.UpdateParameters(ctx, params)
 }
 
+// SuggestSwaps returns a list of suggested swaps based on the liquidity
+// manager's current configuration.
+func (s *Client) SuggestSwaps(ctx context.Context) (*liquidity.SwapSuggestion,
+	error) {
+
+	return s.manager.SuggestSwap(ctx)
+}
+
 // LoopInTerms returns the terms on which the server executes swaps.
 func (s *Client) LoopInTerms(ctx context.Context) (
 	*LoopInTerms, error) {

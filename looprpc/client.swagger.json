@@ -11,6 +11,29 @@
     "application/json"
   ],
   "paths": {
+    "/v1/auto/swaps": {
+      "get": {
+        "summary": "SuggestSwaps returns a list of recommended swaps based on the current\nstate of your node's channels and the autolooper configuration set.",
+        "operationId": "SuggestSwaps",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/looprpcSuggestSwapsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        },
+        "tags": [
+          "SwapClient"
+        ]
+      }
+    },
     "/v1/liquidity/config": {
       "get": {
         "summary": "GetLiquidityConfig gets the config that the liquidity manager subsystem is\ncurrently configured with. This may be nil if nothing is configured.",
@@ -431,11 +454,11 @@
         },
         "node_rule": {
           "$ref": "#/definitions/looprpcLiquidityRule",
-          "description": "A rule to be applied across all of the channels on your node."
+          "description": "A rule to be applied across all of the channels on your node. Note that this\nfield cannot be set if peer rule is set."
         },
         "peer_rule": {
           "$ref": "#/definitions/looprpcLiquidityRule",
-          "description": "A rule to be applier per peer that your node has channels open with."
+          "description": "A rule to be applier per peer that your node has channels open with. Note\nthat this field cannot be set if node rule is set."
         }
       }
     },
@@ -696,6 +719,41 @@
         }
       }
     },
+    "looprpcSuggestSwapsResponse": {
+      "type": "object",
+      "properties": {
+        "rule": {
+          "$ref": "#/definitions/looprpcLiquidityRule",
+          "description": "Rule is the rule that was applied to get these swap recommendations."
+        },
+        "swaps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/looprpcSwapSuggestion"
+          },
+          "description": "The set of swaps that are suggested to conform to the rule provided."
+        }
+      }
+    },
+    "looprpcSwapParameters": {
+      "type": "object",
+      "properties": {
+        "channel_id": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The channel ID that the swap should be restricted to."
+        },
+        "amount": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The amount that should be swapped."
+        },
+        "swap_type": {
+          "$ref": "#/definitions/looprpcSwapType",
+          "description": "The type of swap that should be executed."
+        }
+      }
+    },
     "looprpcSwapResponse": {
       "type": "object",
       "properties": {
@@ -808,6 +866,26 @@
         "label": {
           "type": "string",
           "description": "An optional label given to the swap on creation."
+        }
+      }
+    },
+    "looprpcSwapSuggestion": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "The action that is recommended based on current balances and config.\nTODO(carla): make this an enum."
+        },
+        "reason": {
+          "type": "string",
+          "title": "Additional reasoning to accompany our action.\nTODO(carla): make this an enum"
+        },
+        "swaps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/looprpcSwapParameters"
+          },
+          "description": "The set of swaps that we suggest."
         }
       }
     },

@@ -125,6 +125,16 @@ service SwapClient {
             body: "*"
         };
     }
+
+    /*
+    SuggestSwaps returns a list of recommended swaps based on the current
+    state of your node's channels and the autolooper configuration set.
+    */
+    rpc SuggestSwaps(SuggestSwapsRequest) returns (SuggestSwapsResponse){
+        option (google.api.http) = {
+            get: "/v1/auto/swaps"
+        };
+    }
 }
 
 message LoopOutRequest {
@@ -746,3 +756,49 @@ message SetLiquidityConfigRequest{
     */
     LiquidityConfig config = 1;
 }
+
+message SuggestSwapsRequest{
+}
+
+message SuggestSwapsResponse{
+    /*
+    Rule is the rule that was applied to get these swap recommendations.
+    */
+    LiquidityRule rule = 1;
+
+    /*
+    The set of swaps that are suggested to conform to the rule provided.
+    */
+    repeated SwapSuggestion swaps = 2;
+}
+
+message SwapSuggestion {
+    /*
+    The action that is recommended based on current balances and config.
+    TODO(carla): make this an enum.
+    */
+    string action = 1;
+
+    /*
+    Additional reasoning to accompany our action.
+    TODO(carla): make this an enum
+    */
+    string reason = 2;
+
+    /*
+    The set of swaps that we suggest.
+    */
+    repeated SwapParameters swaps = 3;
+}
+
+message SwapParameters{
+    // The channel ID that the swap should be restricted to.
+    uint64 channel_id = 1;
+
+    // The amount that should be swapped.
+    uint64 amount = 2;
+
+    // The type of swap that should be executed.
+    SwapType swap_type = 3;
+}
+

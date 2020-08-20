@@ -646,6 +646,78 @@ func rpcRule(rule liquidity.Rule) (*looprpc.LiquidityRule, error) {
 	}
 }
 
+// SuggestSwaps provides a list of suggested swaps based on lnd's current
+// channel balances and the requirements configured in the autolooper's config.
+func (s *swapClientServer) SuggestSwaps(ctx context.Context,
+	_ *looprpc.SuggestSwapsRequest) (*looprpc.SuggestSwapsResponse, error) {
+
+	swaps, err := s.impl.SuggestSwaps(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	rule, err := rpcRule(swaps.Rule)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &looprpc.SuggestSwapsResponse{
+		Rule: rule,
+	}
+
+	for _, set := range swaps.Suggestions {
+		rpcSwap, err := rpcSwapSuggestion(set)
+		if err != nil {
+			return nil, err
+		}
+
+		resp.Swaps = append(resp.Swaps, rpcSwap)
+	}
+
+	return resp, nil
+}
+
+func rpcSwapSuggestion(swaps *liquidity.SwapSet) (*looprpc.SwapSuggestion,
+	error) {
+
+	var (
+		rpcSwapType looprpc.SwapType
+		resp        = &looprpc.SwapSuggestion{
+			Action: swaps.Action.String(),
+			Reason: swaps.Reason.String(),
+		}
+	)
+
+	// Switch on our action to decide whether we can return early, or decide
+	// what swap type to set.
+	switch swaps.Action {
+	case liquidity.ActionNone:
+		return resp, nil
+
+	case liquidity.ActionLoopOut:
+		rpcSwapType = looprpc.SwapType_LOOP_OUT
+
+	case liquidity.ActionLoopIn:
+		rpcSwapType = looprpc.SwapType_LOOP_IN
+
+	default:
+		return nil, fmt.Errorf("swaps recommended with "+
+			"observation: %v", swaps.Action)
+	}
+
+	for _, swap := range swaps.Swaps {
+		rpcSwap := &looprpc.SwapParameters{
+			ChannelId: swap.Channel.ToUint64(),
+			Amount:    uint64(swap.Amount),
+			SwapType:  rpcSwapType,
+		}
+
+		resp.Swaps = append(resp.Swaps, rpcSwap)
+	}
+
+	return resp, nil
+}
+
 // processStatusUpdates reads updates on the status channel and processes them.
 //
 // NOTE: This must run inside a goroutine as it blocks until the main context
