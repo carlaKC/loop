@@ -1,5 +1,111 @@
 package liquidity
 
+import (
+	"fmt"
+
+	"github.com/btcsuite/btcutil"
+	"github.com/lightninglabs/loop/swap"
+)
+
+func (r *RatioRule) getSwaps(channelBalances []balances,
+	outRestrictions, inRestrictions Restrictions) (*SwapSet, error) {
+
+	// To decide whether we should swap, we will look at all of our balances
+	// combined.
+	var totalBalance balances
+	for _, balance := range channelBalances {
+		totalBalance.capacity += balance.capacity
+		totalBalance.incoming += balance.incoming
+		totalBalance.outgoing += balance.outgoing
+	}
+
+	// Examine our total balance and required ratios to decide whether we
+	// need to swap.
+	action, reason := shouldSwap(
+		&totalBalance, r.MinimumInbound, r.MinimumOutbound,
+	)
+
+	var (
+		shiftRatio   float32
+		swapType     swap.Type
+		restrictions Restrictions
+	)
+
+	// Switch on our observation, returning for the values that indicate
+	// there is no further action. If we can perform a swap, we calculate
+	// the ratio of our balance that we need to shift.
+	switch action {
+	case ActionNone:
+		return newSwapSet(action, reason, nil), nil
+
+	case ActionLoopOut:
+		swapType = swap.TypeOut
+		restrictions = outRestrictions
+
+		shiftRatio = calculateSwapRatio(
+			totalBalance.incomingRatio(), r.MinimumInbound,
+			totalBalance.outgoingRatio(), r.MinimumOutbound,
+		)
+
+	case ActionLoopIn:
+		swapType = swap.TypeIn
+		restrictions = inRestrictions
+
+		shiftRatio = calculateSwapRatio(
+			totalBalance.outgoingRatio(), r.MinimumOutbound,
+			totalBalance.incomingRatio(), r.MinimumInbound,
+		)
+
+	default:
+		return nil, fmt.Errorf("unknown action: %v", action)
+	}
+
+	// At this stage, we know that we need to perform a swap, and we know
+	// the ratio of our total capacity that we need to move. Before we
+	// proceed, we do a quick check that the amount we need to move is more
+	// than the minimum swap amount.
+	amt := float32(totalBalance.capacity) * shiftRatio
+
+	// If the amount that we need to shift is less than the minimum swap
+	// amount, we cannot perform a swap yet, so we return.
+	if amt < float32(restrictions.MinimumAmount) {
+		return newSwapSet(action, ReasonMinimumAmount, nil), nil
+	}
+
+	// Run through our channels and get their current surplus based on the
+	// direction that our swap will be in. For loop in, we look at our
+	// available inbound, for loop out, we look at outbound. If a specific
+	// channel does not have surplus in the required direction, we skip it.
+	var channels []channelSurplus
+	for _, channel := range channelBalances {
+		var surplus float32
+
+		if swapType == swap.TypeIn {
+			surplus = channel.incomingRatio() - r.MinimumInbound
+		} else {
+			surplus = channel.outgoingRatio() - r.MinimumOutbound
+		}
+
+		if surplus <= 0 {
+			continue
+		}
+
+		channels = append(channels, channelSurplus{
+			amount:  btcutil.Amount(float32(channel.capacity) * surplus),
+			channel: channel.channelID,
+		})
+	}
+
+	// TODO(carla): add multi-swap selection for loop out, mocking the
+	// behaviour of lnd's current split algorithm.
+	swaps := selectSingleSwap(
+		channels, btcutil.Amount(amt), restrictions.MinimumAmount,
+		restrictions.MaximumAmount,
+	)
+
+	return newSwapSet(action, reason, swaps), nil
+}
+
 // shouldSwap examines our current set of balances, and required thresholds and
 // determines whether we can improve our liquidity balance. It returns an enum
 // that indicates the action that should be taken based on these requirements

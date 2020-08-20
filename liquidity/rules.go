@@ -24,6 +24,11 @@ type Rule interface {
 
 	// validate validates the parameters that a rule was created with.
 	validate() error
+
+	// getSwaps returns a set of recommended swaps for a set of channel
+	// balances, taking into account the restrictions placed on swaps.
+	getSwaps(channelBalances []balances, outRestrictions,
+		inRestrictions Restrictions) (*SwapSet, error)
 }
 
 // RatioRule is a liquidity rule that implements minimum incoming and outgoing

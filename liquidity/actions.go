@@ -56,6 +56,11 @@ const (
 	// ReasonLiquidityOk indicates that our inbound and outbound are at
 	// acceptable levels, so we do not need to perform any swaps.
 	ReasonLiquidityOk
+
+	// ReasonMinimumAmount indicates that we recommend performing a swap,
+	// but the amount that we need to swap is less than the minimum swap
+	// amount.
+	ReasonMinimumAmount
 )
 
 // String returns the string representation of an observation.
@@ -72,6 +77,9 @@ func (r Reason) String() string {
 
 	case ReasonLiquidityOk:
 		return "Liquidity ok"
+
+	case ReasonMinimumAmount:
+		return "Imbalance amount less than minimum swap amount"
 
 	default:
 		return "unknown"
