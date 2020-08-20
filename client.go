@@ -11,6 +11,7 @@ import (
 
 	"github.com/btcsuite/btcutil"
 	"github.com/lightninglabs/lndclient"
+	"github.com/lightninglabs/loop/liquidity"
 	"github.com/lightninglabs/loop/loopdb"
 	"github.com/lightninglabs/loop/lsat"
 	"github.com/lightninglabs/loop/swap"
@@ -64,6 +65,8 @@ type Client struct {
 	lndServices *lndclient.LndServices
 	sweeper     *sweep.Sweeper
 	executor    *executor
+
+	manager *liquidity.Manager
 
 	resumeReady chan struct{}
 	wg          sync.WaitGroup
@@ -143,6 +146,34 @@ func NewClient(dbDir string, cfg *ClientConfig) (*Client, func(), error) {
 		loopOutMaxParts:   cfg.LoopOutMaxParts,
 	})
 
+	// Get our current set of terms from the server so that we can validate
+	// future updates to our minimum and maximum swap amounts.
+	inTerms, err := swapServerClient.GetLoopInTerms(
+		context.Background(),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	outTerms, err := swapServerClient.GetLoopOutTerms(
+		context.Background(),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Create our manager config with the server's restrictions.
+	mngrCfg := &liquidity.Config{
+		ServerInRestrictions: liquidity.NewRestrictions(
+			inTerms.MinSwapAmount, inTerms.MaxSwapAmount,
+		),
+		ServerOutRestrictions: liquidity.NewRestrictions(
+			outTerms.MinSwapAmount, outTerms.MaxSwapAmount,
+		),
+	}
+
+	manager := liquidity.NewManager(mngrCfg)
+
 	client := &Client{
 		errChan:      make(chan error),
 		clientConfig: *config,
@@ -150,6 +181,7 @@ func NewClient(dbDir string, cfg *ClientConfig) (*Client, func(), error) {
 		sweeper:      sweeper,
 		executor:     executor,
 		resumeReady:  make(chan struct{}),
+		manager:      manager,
 	}
 
 	cleanup := func() {
@@ -245,6 +277,16 @@ func (s *Client) Run(ctx context.Context,
 	// Setup main context used for cancelation.
 	mainCtx, mainCancel := context.WithCancel(ctx)
 	defer mainCancel()
+
+	// Start our liquidity manager. This loop will exit when our main ctx
+	// is cancelled.
+	s.wg.Add(1)
+	go func() {
+		if err := s.manager.Run(mainCtx); err != nil {
+			log.Errorf("liquidity manager failed: %v", err)
+		}
+		s.wg.Done()
+	}()
 
 	// Query store before starting event loop to prevent new swaps from
 	// being treated as swaps that need to be resumed.
