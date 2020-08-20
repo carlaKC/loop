@@ -8,17 +8,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcutil"
+	"github.com/lightninglabs/lndclient"
+	"github.com/lightninglabs/loop"
+	"github.com/lightninglabs/loop/liquidity"
+	"github.com/lightninglabs/loop/loopdb"
+	"github.com/lightninglabs/loop/looprpc"
+	"github.com/lightninglabs/loop/swap"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/queue"
 	"github.com/lightningnetwork/lnd/routing/route"
-
-	"github.com/lightninglabs/lndclient"
-	"github.com/lightninglabs/loop"
-	"github.com/lightninglabs/loop/loopdb"
-	"github.com/lightninglabs/loop/swap"
-
-	"github.com/btcsuite/btcutil"
-	"github.com/lightninglabs/loop/looprpc"
 )
 
 const (
@@ -545,6 +544,106 @@ func (s *swapClientServer) GetLsatTokens(ctx context.Context,
 	}
 
 	return &looprpc.TokensResponse{Tokens: rpcTokens}, nil
+}
+
+// GetAutoConfig gets our current liquidity manager's config.
+func (s *swapClientServer) GetLiquidityConfig(ctx context.Context,
+	_ *looprpc.GetLiquidityConfigRequest) (*looprpc.LiquidityConfig,
+	error) {
+
+	return s.rpcConfig(ctx, nil)
+}
+
+// SetLiquidityConfig attempts to set our current liquidity manager's config.
+func (s *swapClientServer) SetLiquidityConfig(ctx context.Context,
+	in *looprpc.SetLiquidityConfigRequest) (*looprpc.LiquidityConfig,
+	error) {
+
+	params := &liquidity.Parameters{
+		IncludePrivate: in.Config.IncludePrivate,
+	}
+
+	var err error
+	if in.Config.NodeRule != nil {
+		params.NodeRule, err = rpcToRule(in.Config.NodeRule)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if in.Config.PeerRule != nil {
+		params.PeerRule, err = rpcToRule(in.Config.PeerRule)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return s.rpcConfig(ctx, params)
+}
+
+func rpcToRule(rule *looprpc.LiquidityRule) (liquidity.Rule, error) {
+	switch rule.Type {
+	case looprpc.LiquidityRuleType_RATIO:
+		return liquidity.NewRatioRule(
+			rule.MinimumInbound, rule.MinimumOutbound,
+		), nil
+
+	default:
+		return nil, fmt.Errorf("unknown rule: %T", rule)
+	}
+
+}
+
+// rpcConfig sends a query to our impl to get (nil params), or set (non-nil
+// params) liquidity config and returns the value it responds with. If we
+// lookup our parameters and none are set, we just return an empty config.
+func (s *swapClientServer) rpcConfig(ctx context.Context,
+	params *liquidity.Parameters) (*looprpc.LiquidityConfig, error) {
+
+	cfg, err := s.impl.LiquidityConfig(ctx, params)
+	switch err {
+	case liquidity.ErrNoParameters:
+		return &looprpc.LiquidityConfig{}, nil
+
+	case nil:
+
+	default:
+		return nil, err
+	}
+
+	rpcCfg := &looprpc.LiquidityConfig{
+		IncludePrivate: cfg.IncludePrivate,
+	}
+
+	if cfg.NodeRule != nil {
+		rpcCfg.NodeRule, err = rpcRule(cfg.NodeRule)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if cfg.PeerRule != nil {
+		rpcCfg.PeerRule, err = rpcRule(cfg.PeerRule)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return rpcCfg, nil
+}
+
+func rpcRule(rule liquidity.Rule) (*looprpc.LiquidityRule, error) {
+	switch r := rule.(type) {
+	case *liquidity.RatioRule:
+		return &looprpc.LiquidityRule{
+			Type:            looprpc.LiquidityRuleType_RATIO,
+			MinimumInbound:  r.MinimumInbound,
+			MinimumOutbound: r.MinimumOutbound,
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown rule: %T", rule)
+	}
 }
 
 // processStatusUpdates reads updates on the status channel and processes them.

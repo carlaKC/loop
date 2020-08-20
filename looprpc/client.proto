@@ -104,6 +104,27 @@ service SwapClient {
             get: "/v1/lsat/tokens"
         };
     }
+
+    /*
+    GetLiquidityConfig gets the config that the liquidity manager subsystem is
+    currently configured with. This may be nil if nothing is configured.
+    */
+    rpc GetLiquidityConfig(GetLiquidityConfigRequest) returns (LiquidityConfig){
+        option (google.api.http) = {
+            get: "/v1/liquidity/config"
+        };
+    }
+
+    /*
+    SetLiquidityConfig sets a new config for the liquidity manager subsystem.
+    It returns the config that has been applied.
+    */
+    rpc SetLiquidityConfig(SetLiquidityConfigRequest) returns (LiquidityConfig){
+        option (google.api.http) = {
+            post: "/v1/liquidity/config"
+            body: "*"
+        };
+    }
 }
 
 message LoopOutRequest {
@@ -665,4 +686,63 @@ message LsatToken {
     file name of the token where it's stored on the file system.
     */
     string storage_name = 8;
+}
+
+message GetLiquidityConfigRequest{}
+
+message LiquidityConfig{
+    /*
+    Set to true if we should include private channels in our balance
+    calculations.
+    */
+    bool include_private = 1;
+
+    /*
+    A rule to be applied across all of the channels on your node. Note that this
+    field cannot be set if peer rule is set.
+    */
+    LiquidityRule node_rule = 2;
+
+    /*
+    A rule to be applier per peer that your node has channels open with. Note
+    that this field cannot be set if node rule is set.
+    */
+    LiquidityRule peer_rule = 3;
+}
+
+enum LiquidityRuleType{
+    UNKNOWN = 0;
+    RATIO = 1;
+}
+
+message LiquidityRule{
+    /*
+    Type indicates the type of rule that this message rule represents. Setting
+    this value will determine which fields are used in the message. The comments
+    on each field in this message will be prefixed with the LiquidityRuleType
+    they belong to.
+    */
+    LiquidityRuleType type = 1;
+
+    /*
+    RATIO: Minimum inbound is the minimum inbound ratio beneath which loop outs
+    to acquire inbound liquidity will be recommended when using the ratio rule.
+    */
+    float minimum_inbound = 2;
+
+    /*
+    RATIO: Minimum outbound is the minimum outbound ratio beneath which loop ins
+    to acquire outbound liquidity will be recommended when using the ratio rule.
+    */
+    float minimum_outbound = 3;
+}
+
+message SetLiquidityConfigRequest{
+    /*
+    Config is the desired new config for the liquidity management subsystem.
+    Note that all of the fields in this config will be used to update your
+    current config,so fields that you do not want to change should be set to
+    their current values.
+    */
+    LiquidityConfig config = 1;
 }

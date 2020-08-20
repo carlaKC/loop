@@ -11,6 +11,60 @@
     "application/json"
   ],
   "paths": {
+    "/v1/liquidity/config": {
+      "get": {
+        "summary": "GetLiquidityConfig gets the config that the liquidity manager subsystem is\ncurrently configured with. This may be nil if nothing is configured.",
+        "operationId": "GetLiquidityConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/looprpcLiquidityConfig"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        },
+        "tags": [
+          "SwapClient"
+        ]
+      },
+      "post": {
+        "summary": "SetLiquidityConfig sets a new config for the liquidity manager subsystem.\nIt returns the config that has been applied.",
+        "operationId": "SetLiquidityConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/looprpcLiquidityConfig"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/looprpcSetLiquidityConfigRequest"
+            }
+          }
+        ],
+        "tags": [
+          "SwapClient"
+        ]
+      }
+    },
     "/v1/loop/in": {
       "post": {
         "summary": "* loop: `in`\nLoopIn initiates a loop in swap with the given parameters. The call\nreturns after the swap has been set up with the swap server. From that\npoint onwards, progress can be tracked via the SwapStatus stream\nthat is returned from Monitor().",
@@ -367,6 +421,51 @@
         }
       }
     },
+    "looprpcLiquidityConfig": {
+      "type": "object",
+      "properties": {
+        "include_private": {
+          "type": "boolean",
+          "format": "boolean",
+          "description": "Set to true if we should include private channels in our balance\ncalculations."
+        },
+        "node_rule": {
+          "$ref": "#/definitions/looprpcLiquidityRule",
+          "description": "A rule to be applied across all of the channels on your node."
+        },
+        "peer_rule": {
+          "$ref": "#/definitions/looprpcLiquidityRule",
+          "description": "A rule to be applier per peer that your node has channels open with."
+        }
+      }
+    },
+    "looprpcLiquidityRule": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/looprpcLiquidityRuleType",
+          "description": "Type indicates the type of rule that this message rule represents. Setting\nthis value will determine which fields are used in the message. The comments\non each field in this message will be prefixed with the LiquidityRuleType\nthey belong to."
+        },
+        "minimum_inbound": {
+          "type": "number",
+          "format": "float",
+          "description": "RATIO: Minimum inbound is the minimum inbound ratio beneath which loop outs\nto acquire inbound liquidity will be recommended when using the ratio rule."
+        },
+        "minimum_outbound": {
+          "type": "number",
+          "format": "float",
+          "description": "RATIO: Minimum outbound is the minimum outbound ratio beneath which loop ins\nto acquire outbound liquidity will be recommended when using the ratio rule."
+        }
+      }
+    },
+    "looprpcLiquidityRuleType": {
+      "type": "string",
+      "enum": [
+        "UNKNOWN",
+        "RATIO"
+      ],
+      "default": "UNKNOWN"
+    },
     "looprpcListSwapsResponse": {
       "type": "object",
       "properties": {
@@ -585,6 +684,15 @@
           "type": "integer",
           "format": "int32",
           "description": "The maximally accepted cltv delta of the on-chain htlc."
+        }
+      }
+    },
+    "looprpcSetLiquidityConfigRequest": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "$ref": "#/definitions/looprpcLiquidityConfig",
+          "description": "Config is the desired new config for the liquidity management subsystem.\nNote that all of the fields in this config will be used to update your\ncurrent config,so fields that you do not want to change should be set to\ntheir current values."
         }
       }
     },

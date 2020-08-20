@@ -641,6 +641,14 @@ func (s *Client) LoopInQuote(ctx context.Context,
 	}, nil
 }
 
+// LiquidityConfig can be used to get and set the config for our currently
+// running liquidity manager. To just get config, provide nil parameters.
+func (s *Client) LiquidityConfig(ctx context.Context,
+	params *liquidity.Parameters) (*liquidity.Parameters, error) {
+
+	return s.manager.UpdateParameters(ctx, params)
+}
+
 // LoopInTerms returns the terms on which the server executes swaps.
 func (s *Client) LoopInTerms(ctx context.Context) (
 	*LoopInTerms, error) {
