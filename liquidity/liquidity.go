@@ -8,12 +8,19 @@ import (
 	"sync/atomic"
 
 	"github.com/btcsuite/btcutil"
+	"github.com/lightninglabs/lndclient"
+	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/lightningnetwork/lnd/routing/route"
 )
 
 var (
 	// ErrNoParameters is returned when a request is made to lookup manager
 	// parameters, but none are set.
 	ErrNoParameters = errors.New("no parameters set for manager")
+
+	// ErrNoRules is returned when a request for swap suggestions is made
+	// when we have no rules configured.
+	ErrNoRules = errors.New("no rules set for swap suggestions")
 
 	// ErrSingleRule is returned when parameters try to set liquidity rules
 	// per-node and per-peer at the same time. These rules could contradict
@@ -35,6 +42,9 @@ type Config struct {
 	// ServerOutRestrictions are the limits placed on loop out by the
 	// server.
 	ServerOutRestrictions Restrictions
+
+	// ListChannels provides a list of our currently open channels.
+	ListChannels func(ctx context.Context) ([]lndclient.ChannelInfo, error)
 }
 
 // Parameters is a set of parameters provided by the user which guide how we
@@ -127,6 +137,10 @@ type Manager struct {
 	// of parameters are sent on.
 	paramRequests chan updateParamsRequest
 
+	// suggestionRequests accepts requests for swaps that will help us reach
+	// our configured thresholds.
+	suggestionRequests chan suggestionRequest
+
 	// done is closed when our main event loop is shutting down. This allows
 	// us to cancel requests sent to our main event loop that cannot be
 	// served.
@@ -141,13 +155,37 @@ type updateParamsRequest struct {
 	response chan *Parameters
 }
 
+// suggestionRequest contains a request for a set of suggested swaps.
+type suggestionRequest struct {
+	ctx      context.Context
+	response chan suggestionResponse
+}
+
+// suggestionResponse contains a set of recommended swaps, and any errors that
+// occurred while trying to obtain them.
+type suggestionResponse struct {
+	err     error
+	swapSet *SwapSuggestion
+}
+
+// SwapSuggestion contains the rule we used to determine whether we should
+// perform any swaps, and the set of swaps we recommend.
+type SwapSuggestion struct {
+	// Rule provides the rule that we used to get swap recommendations.
+	Rule Rule
+
+	// Suggestions contains a set of recommended swaps.
+	Suggestions []*SwapSet
+}
+
 // NewManager creates a liquidity manager which has no parameters set.
 func NewManager(cfg *Config) *Manager {
 	return &Manager{
-		cfg:           cfg,
-		params:        nil,
-		done:          make(chan struct{}),
-		paramRequests: make(chan updateParamsRequest),
+		cfg:                cfg,
+		params:             nil,
+		done:               make(chan struct{}),
+		paramRequests:      make(chan updateParamsRequest),
+		suggestionRequests: make(chan suggestionRequest),
 	}
 }
 
@@ -183,11 +221,149 @@ func (m *Manager) run(ctx context.Context) error {
 			// channel.
 			request.response <- m.params
 
+		case request := <-m.suggestionRequests:
+			channels, err := m.cfg.ListChannels(request.ctx)
+			if err != nil {
+				request.response <- suggestionResponse{
+					err: err,
+				}
+				continue
+			}
+
+			swaps, err := m.suggestSwaps(channels)
+			request.response <- suggestionResponse{
+				swapSet: swaps,
+				err:     err,
+			}
+
 		// Return a non-nil error if we receive the instruction to exit.
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 	}
+}
+
+// SuggestSwap queries the manager's main event loop for swap suggestions.
+// Note that this function will block if the manager is not started.
+func (m *Manager) SuggestSwap(ctx context.Context) (*SwapSuggestion, error) {
+	// Send a request to our main event loop to process the updates,
+	// buffering the response channel so that the event loop cannot be
+	// blocked by the client not consuming the request.
+	responseChan := make(chan suggestionResponse, 1)
+	select {
+	case m.suggestionRequests <- suggestionRequest{
+		ctx:      ctx,
+		response: responseChan,
+	}:
+
+	case <-m.done:
+		return nil, ErrShuttingDown
+
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
+	// Wait for a response from the main event loop, or client cancellation.
+	select {
+	case resp := <-responseChan:
+		return resp.swapSet, resp.err
+
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// suggestSwaps divides a set of channels based on our current set of rules, and
+// gets suggested swaps for our current set of rules.
+func (m *Manager) suggestSwaps(channels []lndclient.ChannelInfo) (*SwapSuggestion,
+	error) {
+
+	if m.params.NodeRule != nil && m.params.PeerRule != nil {
+		return nil, ErrNoRules
+	}
+
+	// Run through all of our channels and create a set of balances. We do
+	// not preallocate because we may skip over come channels if they are
+	// private.
+	var (
+		nodeBalances []balances
+		peerBalances = make(map[route.Vertex][]balances)
+	)
+
+	for _, channel := range channels {
+		// If the channel is private and we do not want to include
+		// private channels, skip it.
+		if channel.Private && !m.params.IncludePrivate {
+			continue
+		}
+
+		chanID := lnwire.NewShortChanIDFromInt(channel.ChannelID)
+		balances := balances{
+			outgoing:  channel.LocalBalance,
+			incoming:  channel.RemoteBalance,
+			capacity:  channel.Capacity,
+			channelID: chanID,
+		}
+
+		// We either add our balance to a set of all the balances for
+		// our node, or to a map of balances per-peer. This allows us to
+		// either assess liquidity across all of our channels (for node
+		// level rules) or on a per-peer level (for peer level rules).
+		// Since we do not allow setting of rules for both, we know that
+		// our balance will only be added to one or the other.
+		if m.params.NodeRule != nil {
+			nodeBalances = append(nodeBalances, balances)
+		}
+
+		if m.params.PeerRule != nil {
+			peerBalances[channel.PubKeyBytes] = append(
+				peerBalances[channel.PubKeyBytes], balances,
+			)
+		}
+	}
+
+	// If we are suggesting swaps on a per-node level, we just apply our
+	// rule to every channel we have.
+	if m.params.NodeRule != nil {
+		swaps, err := m.params.NodeRule.getSwaps(
+			nodeBalances, m.cfg.ServerOutRestrictions,
+			m.cfg.ServerInRestrictions,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		return &SwapSuggestion{
+			Rule:        m.params.NodeRule,
+			Suggestions: []*SwapSet{swaps},
+		}, nil
+	}
+
+	if m.params.PeerRule != nil {
+		resp := &SwapSuggestion{
+			Rule: m.params.PeerRule,
+		}
+
+		for _, peer := range peerBalances {
+			swaps, err := m.params.PeerRule.getSwaps(
+				peer, m.cfg.ServerOutRestrictions,
+				m.cfg.ServerInRestrictions,
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			resp.Suggestions = append(resp.Suggestions, swaps)
+		}
+
+		return resp, nil
+	}
+
+	// TODO(carla): refine this
+
+	// If we had no rules set, fail because we cannot provide suggestions
+	// with no rules.
+	return nil, ErrNoRules
 }
 
 // UpdateParameters delivers a request to update our parameters if it is

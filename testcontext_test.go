@@ -62,6 +62,7 @@ func newSwapClient(_ *testing.T, config *clientConfig) *Client {
 		&liquidity.Config{
 			ServerInRestrictions:  restrictions,
 			ServerOutRestrictions: restrictions,
+			ListChannels:          lndServices.Client.ListChannels,
 		},
 	)
 

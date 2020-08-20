@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/btcsuite/btcutil"
+	"github.com/lightninglabs/lndclient"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,6 +19,11 @@ func newTestConfig() *Config {
 	return &Config{
 		ServerInRestrictions:  testRestrictions,
 		ServerOutRestrictions: testRestrictions,
+		ListChannels: func(context.Context) ([]lndclient.ChannelInfo,
+			error) {
+
+			return nil, nil
+		},
 	}
 }
 
