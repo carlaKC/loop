@@ -15,6 +15,12 @@ var (
 	// parameters, but none are set.
 	ErrNoParameters = errors.New("no parameters set for manager")
 
+	// ErrSingleRule is returned when parameters try to set liquidity rules
+	// per-node and per-peer at the same time. These rules could contradict
+	// each other, so setting both is not allowed.
+	ErrSingleRule = errors.New("liquidity rules can be set on a per " +
+		"node or per peer basis, not both")
+
 	// ErrShuttingDown is returned when a request is cancelled because
 	// the manager is shutting down.
 	ErrShuttingDown = errors.New("server shutting down")
@@ -34,6 +40,17 @@ type Config struct {
 // Parameters is a set of parameters provided by the user which guide how we
 // assess liquidity.
 type Parameters struct {
+	// NodeRule is a rule that is applied to our liquidity on a per-node
+	// level. This option is used to set a universal liquidity rule for a
+	// node, and cannot be set if PeerRule is set.
+	NodeRule Rule
+
+	// PeerRule is a liquidity rule that is applied to our liquidity on a
+	// per-peer level. This option is used to set liquidity rules that apply
+	// to all of the channels we have with a peer, and cannot be set if
+	// NodeRule is set.
+	PeerRule Rule
+
 	// IncludePrivate indicates whether we should include private channels
 	// in our balance calculations.
 	IncludePrivate bool
@@ -41,7 +58,34 @@ type Parameters struct {
 
 // String returns the string representation of our parameters.
 func (p *Parameters) String() string {
-	return fmt.Sprintf("include private: %v", p.IncludePrivate)
+	return fmt.Sprintf("include private: %v, node rule: %v, "+
+		"peer rule: %v", p.IncludePrivate, p.NodeRule, p.PeerRule)
+}
+
+// validate checks whether a set of parameters is valid.
+func (p *Parameters) validate() error {
+	nodeRuleSet := p.NodeRule != nil
+	peerRuleSet := p.PeerRule != nil
+
+	// Fail if both generalized rules are set, we do not want this because
+	// it could lead to rules which contradict one another.
+	if nodeRuleSet && peerRuleSet {
+		return ErrSingleRule
+	}
+
+	if nodeRuleSet {
+		if err := p.NodeRule.validate(); err != nil {
+			return err
+		}
+	}
+
+	if peerRuleSet {
+		if err := p.PeerRule.validate(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Restrictions describe the restrictions placed on swaps.
@@ -155,10 +199,15 @@ func (m *Manager) run(ctx context.Context) error {
 func (m *Manager) UpdateParameters(ctx context.Context,
 	params *Parameters) (*Parameters, error) {
 
-	// If the parameters passed in are non-nil, we make a copy here that
-	// we will pass to the main event loop.
+	// If the parameters passed in are non-nil, we check that the proposed
+	// parameters are valid, then make a copy that we will pass to the main
+	// event loop.
 	var requestParameters *Parameters
 	if params != nil {
+		if err := params.validate(); err != nil {
+			return nil, err
+		}
+
 		paramCopy := *params
 		requestParameters = &paramCopy
 	}

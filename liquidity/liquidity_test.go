@@ -47,6 +47,33 @@ func TestUpdateParameters(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, cfg.IncludePrivate)
 
+	// Reset the value on our expected config so that it matches our current
+	// state.
+	expectCfg.IncludePrivate = true
+
+	// Try to set parameters where one entry is invalid.
+	invalidCfg := &Parameters{
+		NodeRule:       NewRatioRule(1, 1),
+		PeerRule:       nil,
+		IncludePrivate: false,
+	}
+	_, err = c.manager.UpdateParameters(ctx, invalidCfg)
+	require.Equal(t, ErrInvalidRatioSum, err)
+
+	// Try to set parameters where the individual entities are valid, but as
+	// a whole the config remains invalid.
+	invalidCfg.NodeRule = NewRatioRule(0.2, 0.2)
+	invalidCfg.PeerRule = NewRatioRule(0.2, 0.2)
+
+	_, err = c.manager.UpdateParameters(ctx, invalidCfg)
+	require.Equal(t, ErrSingleRule, err)
+
+	// Finally, check that neither of these invalid parameter sets were
+	// set.
+	cfg, err = c.manager.UpdateParameters(ctx, nil)
+	require.NoError(t, err)
+	require.Equal(t, expectCfg, cfg)
+
 	// Shutdown the manager.
 	c.waitForFinished()
 }
