@@ -15,6 +15,7 @@ import (
 	"github.com/lightninglabs/loop/lsat"
 	"github.com/lightninglabs/loop/swap"
 	"github.com/lightninglabs/loop/sweep"
+	"github.com/lightningnetwork/lnd/lnwire"
 )
 
 var (
@@ -183,6 +184,15 @@ func (s *Client) FetchSwaps() ([]*SwapInfo, error) {
 			return nil, err
 		}
 
+		outgoing := make(
+			[]lnwire.ShortChannelID,
+			len(swp.Contract.OutgoingChanSet),
+		)
+
+		for i, chanID := range swp.Contract.OutgoingChanSet {
+			outgoing[i] = lnwire.NewShortChanIDFromInt(chanID)
+		}
+
 		swaps = append(swaps, &SwapInfo{
 			SwapType:         swap.TypeOut,
 			SwapContract:     swp.Contract.SwapContract,
@@ -190,6 +200,7 @@ func (s *Client) FetchSwaps() ([]*SwapInfo, error) {
 			SwapHash:         swp.Hash,
 			LastUpdate:       swp.LastUpdateTime(),
 			HtlcAddressP2WSH: htlc.Address,
+			OutgoingChannels: outgoing,
 		})
 	}
 
@@ -220,6 +231,7 @@ func (s *Client) FetchSwaps() ([]*SwapInfo, error) {
 			LastUpdate:        swp.LastUpdateTime(),
 			HtlcAddressP2WSH:  htlcP2WSH.Address,
 			HtlcAddressNP2WSH: htlcNP2WSH.Address,
+			LastHop:           swp.Contract.LastHop,
 		})
 	}
 

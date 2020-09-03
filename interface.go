@@ -7,6 +7,7 @@ import (
 	"github.com/lightninglabs/loop/loopdb"
 	"github.com/lightninglabs/loop/swap"
 	"github.com/lightningnetwork/lnd/lntypes"
+	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/lightningnetwork/lnd/routing/route"
 )
 
@@ -319,6 +320,14 @@ type SwapInfo struct {
 
 	// ExternalHtlc is set to true for external loop-in swaps.
 	ExternalHtlc bool
+
+	// OutgoingChannels is set for loop out swaps that restrict the set of
+	// channels that the off chain payment can use.
+	OutgoingChannels []lnwire.ShortChannelID
+
+	// LastHop is set for loop in swaps that restrict the last hop of the
+	// off chain payment.
+	LastHop *route.Vertex
 }
 
 // LastUpdate returns the last update time of the swap
