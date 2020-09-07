@@ -49,6 +49,23 @@ func getLiquidityManager(client *loop.Client) *liquidity.Manager {
 		},
 		Lnd:   client.LndServices.Client,
 		Clock: clock.NewDefaultClock(),
+		LoopOutQuote: func(ctx context.Context, amount btcutil.Amount,
+			confTarget int32) (btcutil.Amount, btcutil.Amount,
+			btcutil.Amount, error) {
+
+			quote, err := client.LoopOutQuote(
+				ctx, &loop.LoopOutQuoteRequest{
+					Amount:          amount,
+					SweepConfTarget: confTarget,
+				},
+			)
+			if err != nil {
+				return 0, 0, 0, err
+			}
+
+			return quote.SwapFee, quote.MinerFee,
+				quote.PrepayAmount, nil
+		},
 		ListSwaps: func(ctx context.Context) (
 			[]liquidity.ExistingSwap, error) {
 

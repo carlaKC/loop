@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcutil"
 	"github.com/lightninglabs/lndclient"
 	"github.com/lightninglabs/loop/loopdb"
 	"github.com/lightninglabs/loop/swap"
@@ -15,7 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var testTime = time.Date(2020, 02, 13, 0, 0, 0, 0, time.UTC)
+var (
+	testTime = time.Date(2020, 02, 13, 0, 0, 0, 0, time.UTC)
+
+	testSeverFee btcutil.Amount = 1
+	testPrepay   btcutil.Amount = 2
+	testMinerFee btcutil.Amount = 3
+)
 
 // newTestConfig creates a default test config.
 func newTestConfig() *Config {
@@ -27,6 +34,11 @@ func newTestConfig() *Config {
 		},
 		Lnd:   test.NewMockLnd().Client,
 		Clock: clock.NewTestClock(testTime),
+		LoopOutQuote: func(context.Context, btcutil.Amount, int32) (
+			btcutil.Amount, btcutil.Amount, btcutil.Amount, error) {
+
+			return testSeverFee, testMinerFee, testPrepay, nil
+		},
 		ListSwaps: func(context.Context) ([]ExistingSwap, error) {
 			return nil, nil
 		},
@@ -54,11 +66,8 @@ func TestParameters(t *testing.T) {
 	// Provide a valid set of parameters and validate assert that they are
 	// set.
 	originalRule := NewThresholdRule(10, 10)
-	expected := Parameters{
-		ChannelRules: map[lnwire.ShortChannelID]*ThresholdRule{
-			chanID: originalRule,
-		},
-	}
+	expected := newParameters()
+	expected.ChannelRules[chanID] = originalRule
 
 	err := manager.SetParameters(expected)
 	require.NoError(t, err)
@@ -108,6 +117,10 @@ func TestSuggestSwaps(t *testing.T) {
 				},
 			},
 			parameters: Parameters{
+				MaximumSwapFeePPM: DefaultSwapFeePPM,
+				MaximumPrepay:     DefaultPrepay,
+				MaximumMinerFee:   DefaultMinerFee,
+				ConfTarget:        DefaultConfTarget,
 				ChannelRules: map[lnwire.ShortChannelID]*ThresholdRule{
 					chanID1: NewThresholdRule(
 						10, 10,
@@ -132,6 +145,10 @@ func TestSuggestSwaps(t *testing.T) {
 				},
 			},
 			parameters: Parameters{
+				MaximumSwapFeePPM: DefaultSwapFeePPM,
+				MaximumPrepay:     DefaultPrepay,
+				MaximumMinerFee:   DefaultMinerFee,
+				ConfTarget:        DefaultConfTarget,
 				ChannelRules: map[lnwire.ShortChannelID]*ThresholdRule{
 					chanID2: NewThresholdRule(10, 10),
 				},
@@ -321,6 +338,99 @@ func TestEligibleChannels(t *testing.T) {
 			)
 			require.NoError(t, err)
 			require.Equal(t, testCase.eligible, actual)
+		})
+	}
+}
+
+// TestCheckFeeLimits tests checking of fee limits against a quote returned by
+// the server.
+func TestCheckFeeLimits(t *testing.T) {
+	tests := []struct {
+		name                      string
+		amount                    btcutil.Amount
+		params                    Parameters
+		minerFee, swapFee, prepay btcutil.Amount
+		err                       error
+	}{
+		{
+			name:   "fees ok",
+			amount: 100000,
+			params: Parameters{
+				MaximumPrepay:     100,
+				MaximumSwapFeePPM: 5000,
+				MaximumMinerFee:   500,
+				ConfTarget:        DefaultConfTarget,
+			},
+			minerFee: 50,
+			swapFee:  1,
+			prepay:   10,
+			err:      nil,
+		},
+		{
+			name:   "insufficient prepay",
+			amount: 100000,
+			params: Parameters{
+				MaximumPrepay:     100,
+				MaximumSwapFeePPM: 5000,
+				MaximumMinerFee:   500,
+				ConfTarget:        DefaultConfTarget,
+			},
+			minerFee: 50,
+			swapFee:  1,
+			prepay:   200,
+			err:      errInsufficientPrepay,
+		},
+		{
+			name:   "insufficient miner fee",
+			amount: 100000,
+			params: Parameters{
+				MaximumPrepay:     100,
+				MaximumSwapFeePPM: 5000,
+				MaximumMinerFee:   500,
+				ConfTarget:        DefaultConfTarget,
+			},
+			minerFee: 600,
+			swapFee:  1,
+			prepay:   100,
+			err:      errInsufficientMinerFee,
+		},
+		{
+			name:   "insufficient swap fee",
+			amount: 100000,
+			params: Parameters{
+				MaximumPrepay:     100,
+				MaximumSwapFeePPM: 5000,
+				MaximumMinerFee:   500,
+				ConfTarget:        DefaultConfTarget,
+			},
+			minerFee: 500,
+			swapFee:  501,
+			prepay:   100,
+			err:      errInsufficientSwapFee,
+		},
+	}
+
+	for _, testCase := range tests {
+		testCase := testCase
+
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Create a manager and set our test parameters.
+			mgr := NewManager(newTestConfig())
+			err := mgr.SetParameters(testCase.params)
+			require.NoError(t, err)
+
+			suggestion := newLoopOutRecommendation(
+				testCase.amount,
+				lnwire.NewShortChanIDFromInt(1),
+			)
+
+			err = mgr.checkFeeLimits(
+				testCase.swapFee, testCase.minerFee,
+				testCase.prepay, suggestion,
+			)
+			require.Equal(t, testCase.err, err)
 		})
 	}
 }
