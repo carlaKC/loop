@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/lightninglabs/lndclient"
+	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lnwire"
 )
 
@@ -27,6 +28,9 @@ type Config struct {
 
 	// Lnd provides us with access to lnd's main rpc.
 	Lnd lndclient.LightningClient
+
+	// Clock allows easy mocking of time in unit tests.
+	Clock clock.Clock
 }
 
 // Parameters is a set of parameters provided by the user which guide

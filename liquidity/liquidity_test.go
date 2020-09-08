@@ -3,12 +3,16 @@ package liquidity
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/lightninglabs/lndclient"
 	"github.com/lightninglabs/loop/test"
+	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lnwire"
 	"github.com/stretchr/testify/require"
 )
+
+var testTime = time.Date(2020, 02, 13, 0, 0, 0, 0, time.UTC)
 
 // newTestConfig creates a default test config.
 func newTestConfig() *Config {
@@ -18,7 +22,8 @@ func newTestConfig() *Config {
 
 			return NewRestrictions(1, 10000), nil
 		},
-		Lnd: test.NewMockLnd().Client,
+		Lnd:   test.NewMockLnd().Client,
+		Clock: clock.NewTestClock(testTime),
 	}
 }
 
