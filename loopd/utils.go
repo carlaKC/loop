@@ -49,6 +49,28 @@ func getLiquidityManager(client *loop.Client) *liquidity.Manager {
 		},
 		Lnd:   client.LndServices.Client,
 		Clock: clock.NewDefaultClock(),
+		ListSwaps: func(ctx context.Context) (
+			[]liquidity.ExistingSwap, error) {
+
+			swaps, err := client.FetchSwaps()
+			if err != nil {
+				return nil, err
+			}
+
+			existingSwaps := make(
+				[]liquidity.ExistingSwap, len(swaps),
+			)
+
+			for i, swap := range swaps {
+				existingSwaps[i] = liquidity.NewExistingSwap(
+					swap.SwapHash, swap.State,
+					swap.SwapType, swap.OutgoingChannels,
+					swap.LastHop,
+				)
+			}
+
+			return existingSwaps, nil
+		},
 	}
 
 	return liquidity.NewManager(mngrCfg)

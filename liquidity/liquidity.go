@@ -10,8 +10,12 @@ import (
 	"sync"
 
 	"github.com/lightninglabs/lndclient"
+	"github.com/lightninglabs/loop/loopdb"
+	"github.com/lightninglabs/loop/swap"
 	"github.com/lightningnetwork/lnd/clock"
+	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/lightningnetwork/lnd/routing/route"
 )
 
 var (
@@ -25,6 +29,10 @@ type Config struct {
 	// LoopOutRestrictions returns the restrictions that the server applies
 	// to loop out swaps.
 	LoopOutRestrictions func(ctx context.Context) (*Restrictions, error)
+
+	// ListSwaps returns the set of swaps that loop has already created.
+	// These swaps may be in a final or pending state.
+	ListSwaps func(ctx context.Context) ([]ExistingSwap, error)
 
 	// Lnd provides us with access to lnd's main rpc.
 	Lnd lndclient.LightningClient
@@ -76,6 +84,39 @@ func (p Parameters) validate() error {
 	}
 
 	return nil
+}
+
+// ExistingSwap provides information about a swap that has been dispatched.
+type ExistingSwap struct {
+	// SwapHash is the hash used for the swap.
+	SwapHash lntypes.Hash
+
+	// State is the current state of the swap.
+	State loopdb.SwapState
+
+	// Type indicates the type of swap.
+	Type swap.Type
+
+	// Channels is the set of channels that a loop out swap is using.
+	Channels []lnwire.ShortChannelID
+
+	// Peer is the last hop set for loop in (if any).
+	Peer *route.Vertex
+}
+
+// NewExistingSwap creates an existing swap with information about the channels
+// and peers the swap is restricted to, if any.
+func NewExistingSwap(hash lntypes.Hash, state loopdb.SwapState,
+	swapType swap.Type, channels []lnwire.ShortChannelID,
+	peer *route.Vertex) ExistingSwap {
+
+	return ExistingSwap{
+		SwapHash: hash,
+		State:    state,
+		Type:     swapType,
+		Channels: channels,
+		Peer:     peer,
+	}
 }
 
 // Manager contains a set of desired liquidity rules for our channel
@@ -155,19 +196,26 @@ func (m *Manager) SuggestSwaps(ctx context.Context) (
 		return nil, nil
 	}
 
-	channels, err := m.cfg.Lnd.ListChannels(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	// Get the current server side restrictions.
 	outRestrictions, err := m.cfg.LoopOutRestrictions(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	// List our current set of swaps so that we can determine which channels
+	// are already being utilized by swaps.
+	allSwaps, err := m.cfg.ListSwaps(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	eligible, err := m.getEligibleChannels(ctx, allSwaps)
+	if err != nil {
+		return nil, err
+	}
+
 	var suggestions []*LoopOutRecommendation
-	for _, channel := range channels {
+	for _, channel := range eligible {
 		channelID := lnwire.NewShortChanIDFromInt(channel.ChannelID)
 		rule, ok := m.params.ChannelRules[channelID]
 		if !ok {
@@ -186,4 +234,95 @@ func (m *Manager) SuggestSwaps(ctx context.Context) (
 	}
 
 	return suggestions, nil
+}
+
+// getEligibleChannels takes a set of existing swaps, gets a list of channels
+// that are not currently being utilized for a swap which we can suggest swaps
+// for. If an unrestricted swap is ongoing, we return an empty set of channels
+// because we don't know which channels balances it will affect.
+func (m *Manager) getEligibleChannels(ctx context.Context,
+	allSwaps []ExistingSwap) ([]lndclient.ChannelInfo, error) {
+
+	var (
+		existingOut = make(map[lnwire.ShortChannelID]bool)
+		existingIn  = make(map[route.Vertex]bool)
+	)
+
+	for _, s := range allSwaps {
+		// We can ignore swaps that are not in a pending state, because
+		// they will not be affecting our current set of channel
+		// balances going forward, they are resolved.
+		if s.State.Type() != loopdb.StateTypePending {
+			continue
+		}
+
+		// If our swap is un-restricted, return early because we cannot
+		// suggest swaps when we are uncertain where these currently
+		// ongoing swaps will shift our balance. If we have a limit on
+		// the swap's off chain path, we add it to our set of unusable
+		// peers or channels.
+		switch s.Type {
+		case swap.TypeIn:
+			if s.Peer == nil {
+				log.Infof("ongoing unrestricted loop in: "+
+					"%v, no suggestions at present",
+					s.SwapHash)
+
+				return nil, nil
+			}
+
+			existingIn[*s.Peer] = true
+
+		case swap.TypeOut:
+			if len(s.Channels) == 0 {
+				log.Infof("ongoing unrestricted loop out: "+
+					"%v, no suggestions at present",
+					s.SwapHash)
+
+				return nil, nil
+			}
+
+			for _, channel := range s.Channels {
+				existingOut[channel] = true
+			}
+
+		default:
+			return nil, fmt.Errorf("unknown swap type: %v", s.Type)
+		}
+
+	}
+
+	channels, err := m.cfg.Lnd.ListChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Run through our set of channels and skip over any channels that
+	// are currently being utilized by a restricted swap (where restricted
+	// means that a loop out limited channels, or a loop in limited last
+	// hop).
+	var eligible []lndclient.ChannelInfo
+	for _, channel := range channels {
+		shortID := lnwire.NewShortChanIDFromInt(channel.ChannelID)
+
+		if existingOut[shortID] {
+			log.Infof("channel: %v not eligible for "+
+				"suggestions, ongoing loop out utilizing "+
+				"channel", channel.ChannelID)
+
+			continue
+		}
+
+		if existingIn[channel.PubKeyBytes] {
+			log.Infof("channel: %v not eligible for "+
+				"suggestions, ongoing loop in utilizing "+
+				"peer", channel.ChannelID)
+
+			continue
+		}
+
+		eligible = append(eligible, channel)
+	}
+
+	return eligible, nil
 }

@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"github.com/lightninglabs/lndclient"
+	"github.com/lightninglabs/loop/swap"
 	"github.com/lightninglabs/loop/test"
 	"github.com/lightningnetwork/lnd/clock"
 	"github.com/lightningnetwork/lnd/lnwire"
+	"github.com/lightningnetwork/lnd/routing/route"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,6 +26,9 @@ func newTestConfig() *Config {
 		},
 		Lnd:   test.NewMockLnd().Client,
 		Clock: clock.NewTestClock(testTime),
+		ListSwaps: func(context.Context) ([]ExistingSwap, error) {
+			return nil, nil
+		},
 	}
 }
 
@@ -155,6 +160,126 @@ func TestSuggestSwaps(t *testing.T) {
 			swaps, err := manager.SuggestSwaps(context.Background())
 			require.NoError(t, err)
 			require.Equal(t, testCase.swaps, swaps)
+		})
+	}
+}
+
+// TestEligibleChannels tests selection of a set of channels that can be used
+// for automated swaps.
+func TestEligibleChannels(t *testing.T) {
+	var (
+		chanID1 = lnwire.NewShortChanIDFromInt(1)
+		chanID2 = lnwire.NewShortChanIDFromInt(2)
+
+		peer1 = route.Vertex{1}
+		peer2 = route.Vertex{2}
+
+		channel1 = lndclient.ChannelInfo{
+			ChannelID:   chanID1.ToUint64(),
+			PubKeyBytes: peer1,
+		}
+
+		channel2 = lndclient.ChannelInfo{
+			ChannelID:   chanID2.ToUint64(),
+			PubKeyBytes: peer2,
+		}
+	)
+
+	tests := []struct {
+		name     string
+		swaps    []ExistingSwap
+		channels []lndclient.ChannelInfo
+		eligible []lndclient.ChannelInfo
+	}{
+		{
+			name: "no existing swaps",
+			channels: []lndclient.ChannelInfo{
+				channel1, channel2,
+			},
+			swaps: nil,
+			eligible: []lndclient.ChannelInfo{
+				channel1, channel2,
+			},
+		},
+		{
+			name: "unrestricted loop out",
+			channels: []lndclient.ChannelInfo{
+				channel1, channel2,
+			},
+			swaps: []ExistingSwap{
+				{
+					Type: swap.TypeOut,
+				},
+			},
+			eligible: nil,
+		},
+		{
+			name: "unrestricted loop in",
+			channels: []lndclient.ChannelInfo{
+				channel1, channel2,
+			},
+			swaps: []ExistingSwap{
+				{
+					Type: swap.TypeIn,
+				},
+			},
+			eligible: nil,
+		},
+		{
+			name: "restricted loop out",
+			channels: []lndclient.ChannelInfo{
+				channel1, channel2,
+			},
+			swaps: []ExistingSwap{
+				{
+					Type: swap.TypeOut,
+					Channels: []lnwire.ShortChannelID{
+						chanID1,
+					},
+				},
+			},
+			eligible: []lndclient.ChannelInfo{
+				channel2,
+			},
+		},
+		{
+			name: "restricted loop in",
+			channels: []lndclient.ChannelInfo{
+				channel1, channel2,
+			},
+			swaps: []ExistingSwap{
+				{
+					Type: swap.TypeIn,
+					Peer: &peer2,
+				},
+			},
+			eligible: []lndclient.ChannelInfo{
+				channel1,
+			},
+		},
+	}
+
+	for _, testCase := range tests {
+		testCase := testCase
+
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := newTestConfig()
+
+			// Create a mock lnd with the set of channels set in our
+			// test case.
+			mock := test.NewMockLnd()
+			mock.Channels = testCase.channels
+			cfg.Lnd = mock.Client
+
+			manager := NewManager(cfg)
+
+			actual, err := manager.getEligibleChannels(
+				context.Background(), testCase.swaps,
+			)
+			require.NoError(t, err)
+			require.Equal(t, testCase.eligible, actual)
 		})
 	}
 }
