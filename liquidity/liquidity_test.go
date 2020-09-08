@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/lightninglabs/lndclient"
+	"github.com/lightninglabs/loop/loopdb"
 	"github.com/lightninglabs/loop/swap"
 	"github.com/lightninglabs/loop/test"
 	"github.com/lightningnetwork/lnd/clock"
@@ -255,6 +256,46 @@ func TestEligibleChannels(t *testing.T) {
 			},
 			eligible: []lndclient.ChannelInfo{
 				channel1,
+			},
+		},
+		{
+			name: "swap failed recently",
+			channels: []lndclient.ChannelInfo{
+				channel1, channel2,
+			},
+			swaps: []ExistingSwap{
+				{
+					Type: swap.TypeOut,
+					Channels: []lnwire.ShortChannelID{
+						chanID1,
+					},
+					State:      loopdb.StateFailOffchainPayments,
+					LastUpdate: testTime,
+				},
+			},
+			eligible: []lndclient.ChannelInfo{
+				channel2,
+			},
+		},
+		{
+			name: "swap failed before cutoff",
+			channels: []lndclient.ChannelInfo{
+				channel1, channel2,
+			},
+			swaps: []ExistingSwap{
+				{
+					Type: swap.TypeOut,
+					Channels: []lnwire.ShortChannelID{
+						chanID1,
+					},
+					State: loopdb.StateFailOffchainPayments,
+					LastUpdate: testTime.Add(
+						DefaultFailureBackOff * -1,
+					),
+				},
+			},
+			eligible: []lndclient.ChannelInfo{
+				channel1, channel2,
 			},
 		},
 	}

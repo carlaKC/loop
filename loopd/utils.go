@@ -63,9 +63,9 @@ func getLiquidityManager(client *loop.Client) *liquidity.Manager {
 
 			for i, swap := range swaps {
 				existingSwaps[i] = liquidity.NewExistingSwap(
-					swap.SwapHash, swap.State,
-					swap.SwapType, swap.OutgoingChannels,
-					swap.LastHop,
+					swap.LastUpdate, swap.SwapHash,
+					swap.State, swap.SwapType,
+					swap.OutgoingChannels, swap.LastHop,
 				)
 			}
 
