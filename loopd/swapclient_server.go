@@ -556,6 +556,11 @@ func (s *swapClientServer) GetLiquidityParams(_ context.Context,
 	cfg := s.liquidityMgr.GetParameters()
 
 	rpcCfg := &looprpc.LiquidityParameters{
+		MaxMinerFee:     uint64(cfg.MaximumMinerFee),
+		MaxSwapFeePpm:   uint64(cfg.MaximumSwapFeePPM),
+		MaxPrepay:       uint64(cfg.MaximumPrepay),
+		SweepConfTarget: cfg.ConfTarget,
+		FailureBackoff:  uint64(cfg.FailureBackOff.Seconds()),
 		Rules: make(
 			[]*looprpc.LiquidityRule, 0, len(cfg.ChannelRules),
 		),
@@ -582,6 +587,12 @@ func (s *swapClientServer) SetLiquidityParams(_ context.Context,
 	error) {
 
 	params := liquidity.Parameters{
+		MaximumMinerFee:   btcutil.Amount(in.Parameters.MaxMinerFee),
+		MaximumSwapFeePPM: int(in.Parameters.MaxSwapFeePpm),
+		MaximumPrepay:     btcutil.Amount(in.Parameters.MaxPrepay),
+		ConfTarget:        in.Parameters.SweepConfTarget,
+		FailureBackOff: time.Duration(in.Parameters.FailureBackoff) *
+			time.Second,
 		ChannelRules: make(
 			map[lnwire.ShortChannelID]*liquidity.ThresholdRule,
 			len(in.Parameters.Rules),

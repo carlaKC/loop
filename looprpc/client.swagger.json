@@ -453,6 +453,31 @@
             "$ref": "#/definitions/looprpcLiquidityRule"
           },
           "description": "A set of liquidity rules that describe the desired liquidity balance."
+        },
+        "max_swap_fee_ppm": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The maximum fee in paid to the server for facilitating the swap, expressed\nas parts per million of the swap volume, swap suggestions with fees higher\nthan this will be excluded."
+        },
+        "max_prepay": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The maximum no-show penalty in satoshis paid for a swap, swap suggestions\nabove this amount will be excluded."
+        },
+        "max_miner_fee": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The maximum miner fee for a swap in satoshis, swap suggestions above this\namount will be excluded."
+        },
+        "sweep_conf_target": {
+          "type": "integer",
+          "format": "int32",
+          "description": "The number of blocks from the on-chain HTLC's confirmation height that it\nshould be swept within."
+        },
+        "failure_backoff": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The amount of time we require pass since a channel was part of a failed\nswap until it will be considered for swap suggestions again, expressed in\nseconds."
         }
       }
     },
