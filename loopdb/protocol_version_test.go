@@ -3,7 +3,7 @@ package loopdb
 import (
 	"testing"
 
-	"github.com/lightninglabs/loop/looprpc"
+	looprpc "github.com/lightninglabs/loop/server/serverrpc"
 	"github.com/stretchr/testify/require"
 )
 

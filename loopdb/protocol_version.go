@@ -3,7 +3,7 @@ package loopdb
 import (
 	"math"
 
-	"github.com/lightninglabs/loop/looprpc"
+	looprpc "github.com/lightninglabs/loop/server/serverrpc"
 )
 
 // ProtocolVersion represents the protocol version (declared on rpc level) that
