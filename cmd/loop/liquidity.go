@@ -399,3 +399,24 @@ func suggestSwap(ctx *cli.Context) error {
 
 	return nil
 }
+
+var forceTickCmd = cli.Command{
+	Name:  "forcetick",
+	Usage: "force the autolooper to tick",
+	Description: "This command will force the autolooper to tick, " +
+		"intended for testing purposes only, will not work on mainnet.",
+	Action: forceTick,
+}
+
+func forceTick(ctx *cli.Context) error {
+	client, cleanup, err := getClient(ctx)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	_, err = client.ForceAutoLoop(
+		context.Background(), &looprpc.ForceAutoLoopRequest{},
+	)
+	return err
+}
