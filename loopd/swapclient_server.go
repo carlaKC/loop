@@ -34,6 +34,7 @@ const (
 
 // swapClientServer implements the grpc service exposed by loopd.
 type swapClientServer struct {
+	network          lndclient.Network
 	impl             *loop.Client
 	liquidityMgr     *liquidity.Manager
 	lnd              *lndclient.LndServices
@@ -716,6 +717,20 @@ func (s *swapClientServer) SuggestSwaps(ctx context.Context,
 	return &looprpc.SuggestSwapsResponse{
 		LoopOut: loopOut,
 	}, nil
+}
+
+// ForceAutoLoop triggers our liquidity manager to dispatch an automated swap,
+// if one is suggested. This endpoint is only for testing purposes and cannot be
+// used on mainnet.
+func (s *swapClientServer) ForceAutoLoop(ctx context.Context,
+	_ *looprpc.ForceAutoLoopRequest) (*looprpc.ForceAutoLoopResponse, error) {
+
+	if s.network == lndclient.NetworkMainnet {
+		return nil, fmt.Errorf("force autoloop not allowed on mainnet")
+	}
+
+	s.liquidityMgr.ForceAutoLoop(ctx)
+	return &looprpc.ForceAutoLoopResponse{}, nil
 }
 
 // processStatusUpdates reads updates on the status channel and processes them.

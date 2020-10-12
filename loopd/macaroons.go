@@ -92,6 +92,10 @@ var (
 			Entity: "suggestions",
 			Action: "write",
 		}},
+		"/looprpc.SwapClient/ForceAutoLoop": {{
+			Entity: "suggestions",
+			Action: "write",
+		}},
 	}
 
 	// allPermissions is the list of all existing permissions that exist

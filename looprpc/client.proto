@@ -140,6 +140,17 @@ service SwapClient {
             get: "/v1/auto/suggest"
         };
     }
+
+    /*
+    ForceAutoLoop is intended for *testing purposes only* and will not work on
+    mainnet. This endpoint ticks our autoloop timer, triggering automated
+    dispatch of a swap if one is suggested.
+    */
+    rpc ForceAutoLoop(ForceAutoLoopRequest) returns (ForceAutoLoopResponse){
+        option (google.api.http) = {
+            get: "/v1/auto/force"
+        };
+    }
 }
 
 message LoopOutRequest {
@@ -845,3 +856,8 @@ message SuggestSwapsResponse{
     repeated LoopOutRequest loop_out= 1;
 }
 
+message ForceAutoLoopRequest {
+}
+
+message ForceAutoLoopResponse {
+}

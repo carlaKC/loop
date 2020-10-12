@@ -355,6 +355,7 @@ func (d *Daemon) initialize() error {
 
 	// Now finally fully initialize the swap client RPC server instance.
 	d.swapClientServer = swapClientServer{
+		network:      lndclient.Network(d.cfg.Network),
 		impl:         swapclient,
 		liquidityMgr: getLiquidityManager(swapclient),
 		lnd:          &d.lnd.LndServices,
