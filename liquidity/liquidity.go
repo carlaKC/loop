@@ -790,7 +790,7 @@ func (m *Manager) checkExistingAutoLoops(ctx context.Context,
 				out.Contract.MaxMinerFee,
 				mSatToSatoshis(prepay.Value),
 			)
-		} else if m.params.AutoFeeStartDate.Before(out.LastUpdateTime()) {
+		} else if !out.LastUpdateTime().Before(m.params.AutoFeeStartDate) {
 			summary.spentFees += out.State().Cost.Total()
 		}
 	}
