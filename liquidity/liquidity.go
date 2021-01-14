@@ -177,6 +177,9 @@ var (
 	// less than the server minimum.
 	ErrMinLessThanServer = errors.New("minimum swap amount is less than " +
 		"server minimum")
+
+	// ErrNoRules is returned when no rules are set for swap suggestions.
+	ErrNoRules = errors.New("no rules set for autoloop")
 )
 
 // Config contains the external functionality required to run the
@@ -437,7 +440,14 @@ func (m *Manager) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-m.cfg.AutoOutTicker.Ticks():
-			if err := m.autoloop(ctx); err != nil {
+			err := m.autoloop(ctx)
+			switch err {
+			case ErrNoRules:
+				log.Debugf("No rules configured for autoloop")
+
+			case nil:
+
+			default:
 				log.Errorf("autoloop failed: %v", err)
 			}
 
@@ -551,7 +561,7 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoOut bool) (
 	// If we have no rules set, exit early to avoid unnecessary calls to
 	// lnd and the server.
 	if len(m.params.ChannelRules) == 0 {
-		return nil, nil
+		return nil, ErrNoRules
 	}
 
 	// If our start date is in the future, we interpret this as meaning that

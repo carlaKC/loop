@@ -22,6 +22,9 @@ This file tracks release notes for the loop client.
   swaps even if there are manually initiated swaps that are not limited to a
   single channel in progress. This change was made to allow autoloop to coexist
   with manual swaps. 
+* The `SuggestSwaps` rpc call will now fail with a `FailedPrecondition` grpc
+  error if no rules are configured for the autolooper. Previously the rpc would
+  fail silently. 
 
 #### Breaking Changes
 
