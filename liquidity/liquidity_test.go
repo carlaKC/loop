@@ -298,7 +298,7 @@ func TestRestrictedSuggestions(t *testing.T) {
 		{
 			name: "unrestricted loop out",
 			channels: []lndclient.ChannelInfo{
-				channel1, channel2,
+				channel1,
 			},
 			loopOut: []*loopdb.LoopOut{
 				{
@@ -307,12 +307,14 @@ func TestRestrictedSuggestions(t *testing.T) {
 					},
 				},
 			},
-			expected: nil,
+			expected: []loop.OutRequest{
+				chan1Rec,
+			},
 		},
 		{
 			name: "unrestricted loop in",
 			channels: []lndclient.ChannelInfo{
-				channel1, channel2,
+				channel1,
 			},
 			loopIn: []*loopdb.LoopIn{
 				{
@@ -321,7 +323,9 @@ func TestRestrictedSuggestions(t *testing.T) {
 					},
 				},
 			},
-			expected: nil,
+			expected: []loop.OutRequest{
+				chan1Rec,
+			},
 		},
 		{
 			name: "restricted loop out",
