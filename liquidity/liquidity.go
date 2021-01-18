@@ -519,7 +519,7 @@ func (m *Manager) autoloop(ctx context.Context) error {
 		return err
 	}
 
-	for _, swap := range swaps {
+	for _, swap := range swaps.Swaps {
 		// Create a copy of our range var so that we can reference it.
 		swap := swap
 		loopOut, err := m.cfg.LoopOut(ctx, &swap)
@@ -546,6 +546,27 @@ func (m *Manager) ForceAutoLoop(ctx context.Context) error {
 	}
 }
 
+// Ineligible describes a target that has a rule configured but is not eligible
+// for a swap.
+type Ineligible struct {
+	// ChannelID identifies the target for the swap.
+	ChannelID lnwire.ShortChannelID
+
+	// Reason indicates why the target is not eligible for a swap.
+	Reason
+}
+
+// Suggestions contains a set of suggested swaps, and a list of channels that
+// were considered for swaps, but were not eligible.
+type Suggestions struct {
+	// Swaps contains the swaps that are recommended.
+	Swaps []loop.OutRequest
+
+	// Ineligible lists a set of channels that were not chosen for swaps,
+	// along with the reasons that they were not chosen.
+	Ineligible []*Ineligible
+}
+
 // SuggestSwaps returns a set of swap suggestions based on our current liquidity
 // balance for the set of rules configured for the manager, failing if there are
 // no rules set. It takes an autoOut boolean that indicates whether the
@@ -553,58 +574,14 @@ func (m *Manager) ForceAutoLoop(ctx context.Context) error {
 // to determine the information we add to our swap suggestion and whether we
 // return any suggestions.
 func (m *Manager) SuggestSwaps(ctx context.Context, autoOut bool) (
-	[]loop.OutRequest, error) {
+	*Suggestions, error) {
 
 	m.paramsLock.Lock()
 	defer m.paramsLock.Unlock()
 
-	// If we have no rules set, exit early to avoid unnecessary calls to
-	// lnd and the server.
-	if len(m.params.ChannelRules) == 0 {
-		return nil, ErrNoRules
-	}
-
-	// If our start date is in the future, we interpret this as meaning that
-	// we should start using our budget at this date. This means that we
-	// have no budget for the present, so we just return.
-	if m.params.AutoFeeStartDate.After(m.cfg.Clock.Now()) {
-		log.Debugf("autoloop fee budget start time: %v is in "+
-			"the future", m.params.AutoFeeStartDate)
-
-		return nil, nil
-	}
-
-	// Before we get any swap suggestions, we check what the current fee
-	// estimate is to sweep within our target number of confirmations. If
-	// This fee exceeds the fee limit we have set, we will not suggest any
-	// swaps at present.
-	estimate, err := m.cfg.Lnd.WalletKit.EstimateFee(
-		ctx, m.params.SweepConfTarget,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	if estimate > m.params.SweepFeeRateLimit {
-		log.Debugf("Current fee estimate to sweep within: %v blocks "+
-			"%v sat/vByte exceeds limit of: %v sat/vByte",
-			m.params.SweepConfTarget,
-			satPerKwToSatPerVByte(estimate),
-			satPerKwToSatPerVByte(m.params.SweepFeeRateLimit))
-
-		return nil, nil
-	}
-
-	// Get the current server side restrictions, combined with the client
-	// set restrictions, if any.
-	outRestrictions, err := m.getLoopOutRestrictions(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	// List our current set of swaps so that we can determine which channels
-	// are already being utilized by swaps. Note that these calls may race
-	// with manual initiation of swaps.
+	// are already being utilized by swaps, and calculate our budget use so
+	// far. Note that these calls may race with manual initiation of swaps.
 	loopOut, err := m.cfg.ListLoopOut()
 	if err != nil {
 		return nil, err
@@ -615,30 +592,9 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoOut bool) (
 		return nil, err
 	}
 
-	// Get a summary of our existing swaps so that we can check our autoloop
-	// budget.
-	summary, err := m.checkExistingAutoLoops(ctx, loopOut)
+	reason, err := m.canSwap(ctx, loopOut, loopIn)
 	if err != nil {
 		return nil, err
-	}
-
-	if summary.totalFees() >= m.params.AutoFeeBudget {
-		log.Debugf("autoloop fee budget: %v exhausted, %v spent on "+
-			"completed swaps, %v reserved for ongoing swaps "+
-			"(upper limit)",
-			m.params.AutoFeeBudget, summary.spentFees,
-			summary.pendingFees)
-
-		return nil, nil
-	}
-
-	// If we have already reached our total allowed number of in flight
-	// swaps, we do not suggest any more at the moment.
-	allowedSwaps := m.params.MaxAutoInFlight - summary.inFlightCount
-	if allowedSwaps <= 0 {
-		log.Debugf("%v autoloops allowed, %v in flight",
-			m.params.MaxAutoInFlight, summary.inFlightCount)
-		return nil, nil
 	}
 
 	eligible, err := m.getEligibleChannels(ctx, loopOut, loopIn)
@@ -751,6 +707,82 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoOut bool) (
 	}
 
 	return inBudget, nil
+}
+
+// canSwap examines our current conditions to determine whether we can perform
+// a swap at all.
+func (m *Manager) canSwap(ctx context.Context, loopOut []*nautdb.LoopOut,
+	loopIn []*nautdb.LoopIn) (Reason, error) {
+
+	// If we have no rules set, exit early to avoid unnecessary calls to
+	// lnd and the server.
+	if len(m.params.ChannelRules) == 0 {
+		return 0, ErrNoRules
+	}
+
+	// If our start date is in the future, we interpret this as meaning that
+	// we should start using our budget at this date. This means that we
+	// have no budget for the present, so we cannot perform any swaps.
+	if m.params.AutoFeeStartDate.After(m.cfg.Clock.Now()) {
+		log.Debugf("autoloop fee budget start time: %v is in "+
+			"the future", m.params.AutoFeeStartDate)
+
+		return ReasonBudgetElapsed, nil
+	}
+
+	// If the current estimated fee exceeds our fee limit, we cannot perform
+	// any swaps.
+	estimate, err := m.cfg.Lnd.WalletKit.EstimateFee(
+		ctx, m.params.SweepConfTarget,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	if estimate > m.params.SweepFeeRateLimit {
+		log.Debugf("Current fee estimate to sweep within: %v blocks "+
+			"%v sat/vByte exceeds limit of: %v sat/vByte",
+			m.params.SweepConfTarget,
+			satPerKwToSatPerVByte(estimate),
+			satPerKwToSatPerVByte(m.params.SweepFeeRateLimit))
+
+		return ReasonFeesToHigh, nil
+	}
+
+	// Get the current server side restrictions, combined with the client
+	// set restrictions, if any.
+	outRestrictions, err := m.getLoopOutRestrictions(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	// Get a summary of our existing swaps so that we can check our autoloop
+	// budget.
+	summary, err := m.checkExistingAutoLoops(ctx, loopOut)
+	if err != nil {
+		return 0, err
+	}
+
+	if summary.totalFees() >= m.params.AutoFeeBudget {
+		log.Debugf("autoloop fee budget: %v exhausted, %v spent on "+
+			"completed swaps, %v reserved for ongoing swaps "+
+			"(upper limit)",
+			m.params.AutoFeeBudget, summary.spentFees,
+			summary.pendingFees)
+
+		return ReasonBudgetConsumed, nil
+	}
+
+	// If we have already reached our total allowed number of in flight
+	// swaps, we do not suggest any more at the moment.
+	allowedSwaps := m.params.MaxAutoInFlight - summary.inFlightCount
+	if allowedSwaps <= 0 {
+		log.Debugf("%v autoloops allowed, %v in flight",
+			m.params.MaxAutoInFlight, summary.inFlightCount)
+		return ReasonInFlightLimit, nil
+	}
+
+	return ReasonNone, nil
 }
 
 // getLoopOutRestrictions queries the server for its latest swap size
