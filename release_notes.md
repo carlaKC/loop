@@ -18,6 +18,10 @@ This file tracks release notes for the loop client.
 #### New Features
 * If lnd is locked when the loop client starts up, it will wait for lnd to be 
   unlocked. Previous versions would exit with an error. 
+* The rules used for autoloop have been relaxed to allow autoloop to dispatch
+  swaps even if there are manually initiated swaps that are not limited to a
+  single channel in progress. This change was made to allow autoloop to coexist
+  with manual swaps. 
 
 #### Breaking Changes
 
