@@ -80,12 +80,12 @@ func (r *ThresholdRule) suggestSwap(channel *balances,
 
 	case amount > outRestrictions.Maximum:
 		return newLoopOutRecommendation(
-			outRestrictions.Maximum, channel.channelID,
+			outRestrictions.Maximum, channel.channels,
 		)
 
 	default:
 		return newLoopOutRecommendation(
-			amount, channel.channelID,
+			amount, channel.channels,
 		)
 	}
 }
