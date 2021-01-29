@@ -99,7 +99,7 @@ var (
 	// and restricted to a channel that we do not use in our tests.
 	autoOutContract = &loopdb.LoopOutContract{
 		SwapContract: loopdb.SwapContract{
-			Label:          labels.AutoOutLabel(),
+			Label:          labels.AutoloopLabel(true),
 			InitiationTime: testBudgetStart,
 		},
 		OutgoingChanSet: loopdb.ChannelSet{999},

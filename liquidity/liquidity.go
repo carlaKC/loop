@@ -816,7 +816,7 @@ func (m *Manager) makeLoopOutRequest(ctx context.Context,
 	}
 
 	if autoloop {
-		request.Label = labels.AutoOutLabel()
+		request.Label = labels.AutoloopLabel(true)
 
 		addr, err := m.cfg.Lnd.WalletKit.NextAddr(ctx)
 		if err != nil {
@@ -882,7 +882,7 @@ func (m *Manager) checkExistingAutoLoops(ctx context.Context,
 	var summary existingAutoLoopSummary
 
 	for _, out := range loopOuts {
-		if out.Contract.Label != labels.AutoOutLabel() {
+		if out.Contract.Label != labels.AutoloopLabel(true) {
 			continue
 		}
 
