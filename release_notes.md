@@ -18,6 +18,9 @@ This file tracks release notes for the loop client.
 #### New Features
 * If lnd is locked when the loop client starts up, it will wait for lnd to be 
   unlocked. Previous versions would exit with an error. 
+* The `SuggestSwaps` rpc call will now fail with a `FailedPrecondition` grpc
+  error if no rules are configured for the autolooper. Previously the rpc would
+  fail silently. 
 
 #### Breaking Changes
 * The `AutoOut`, `AutoOutBudgetSat` and `AutoOutBudgetStartSec` fields in the
