@@ -98,8 +98,8 @@ func TestValidateThreshold(t *testing.T) {
 func TestLoopOutAmount(t *testing.T) {
 	tests := []struct {
 		name        string
-		minIncoming int
-		minOutgoing int
+		minIncoming uint64
+		minOutgoing uint64
 		balances    *balances
 		amt         btcutil.Amount
 	}{
@@ -166,8 +166,9 @@ func TestLoopOutAmount(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			amt := loopOutSwapAmount(
-				test.balances, test.minIncoming,
+			amt := calculateSwapAmount(
+				test.balances.incoming, test.balances.outgoing,
+				test.balances.capacity, test.minIncoming,
 				test.minOutgoing,
 			)
 			require.Equal(t, test.amt, amt)

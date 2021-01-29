@@ -68,9 +68,12 @@ func (r *ThresholdRule) swapAmount(channel *balances,
 	outRestrictions *Restrictions) btcutil.Amount {
 
 	// Examine our total balance and required ratios to decide whether we
-	// need to swap.
-	amount := loopOutSwapAmount(
-		channel, r.MinimumIncoming, r.MinimumOutgoing,
+	// need to swap. For loop out, we want to acquire liquidity in the
+	// incoming direction, while preserving come outgoing balance (if
+	// desired).
+	amount := calculateSwapAmount(
+		channel.incoming, channel.outgoing, channel.capacity,
+		uint64(r.MinimumIncoming), uint64(r.MinimumOutgoing),
 	)
 
 	// Limit our swap amount by the minimum/maximum thresholds set.
@@ -86,30 +89,34 @@ func (r *ThresholdRule) swapAmount(channel *balances,
 	}
 }
 
-// loopOutSwapAmount determines whether we can perform a loop out swap, and
-// returns the amount we need to swap to reach the desired liquidity balance
-// specified by the incoming and outgoing thresholds.
-func loopOutSwapAmount(balances *balances, incomingThresholdPercent,
-	outgoingThresholdPercent int) btcutil.Amount {
+// calculate swap amount calculates amount for a swap based on thresholds.
+// This function can be used for loop out or loop in, but the concept is the
+// same - we want liquidity in one (target) direction, while preserving some
+// minimum in the other (reserve) direction.
+// * target: this is the side of the channel(s) where we want to acquire some
+//   liquidity. We aim for this liquidity to reach the threshold amount set.
+// * reserve: this is the side of the channel(s) that we will move liquidity
+//   away from. This may not drop below a certain reserve threshold.
+func calculateSwapAmount(targetAmount, reserveAmount, capacity btcutil.Amount,
+	targetThresholdPercentage,
+	reserveThresholdPercentage uint64) btcutil.Amount {
 
-	minimumIncoming := btcutil.Amount(uint64(
-		balances.capacity) *
-		uint64(incomingThresholdPercent) / 100,
+	targetGoal := btcutil.Amount(
+		uint64(capacity) * targetThresholdPercentage / 100,
 	)
 
-	minimumOutgoing := btcutil.Amount(
-		uint64(balances.capacity) *
-			uint64(outgoingThresholdPercent) / 100,
+	reserveMinimum := btcutil.Amount(
+		uint64(capacity) * reserveThresholdPercentage / 100,
 	)
 
 	switch {
-	// If we have sufficient incoming capacity, we do not need to loop out.
-	case balances.incoming >= minimumIncoming:
+	// If we have sufficient target capacity, we do not need to swap.
+	case targetAmount >= targetGoal:
 		return 0
 
-	// If we are already below the threshold set for outgoing capacity, we
+	// If we are already below the threshold set for reserve capacity, we
 	// cannot take any further action.
-	case balances.outgoing <= minimumOutgoing:
+	case reserveAmount <= reserveMinimum:
 		return 0
 
 	}
@@ -117,21 +124,21 @@ func loopOutSwapAmount(balances *balances, incomingThresholdPercent,
 	// Express our minimum outgoing amount as a maximum incoming amount.
 	// We will use this value to limit the amount that we swap, so that we
 	// do not dip below our outgoing threshold.
-	maximumIncoming := balances.capacity - minimumOutgoing
+	maximumTarget := capacity - reserveMinimum
 
-	// Calculate the midpoint between our minimum and maximum incoming
-	// values. We will aim to swap this amount so that we do not tip our
-	// outgoing balance beneath the desired level.
-	midpoint := (minimumIncoming + maximumIncoming) / 2
+	// Calculate the midpoint between our minimum and maximum target values.
+	// We will aim to swap this amount so that we do not tip our reserve
+	// balance beneath the desired level.
+	midpoint := (targetGoal + maximumTarget) / 2
 
-	// Calculate the amount of incoming balance we need to shift to reach
+	// Calculate the amount of target balance we need to shift to reach
 	// this desired midpoint.
-	required := midpoint - balances.incoming
+	required := midpoint - targetAmount
 
 	// Since we can have pending htlcs on our channel, we check the amount
-	// of outbound capacity that we can shift before we fall below our
+	// of reserve capacity that we can shift before we fall below our
 	// threshold.
-	available := balances.outgoing - minimumOutgoing
+	available := reserveAmount - reserveMinimum
 
 	// If we do not have enough balance available to reach our midpoint, we
 	// take no action. This is the case when we have a large portion of
