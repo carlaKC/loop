@@ -29,6 +29,11 @@ This file tracks release notes for the loop client.
   why the Autolooper is not currently dispatching swaps for the set of rules
   that the client is configured with. See the [autoloop documentation](docs/autoloop.md) for a
   detailed explanations of these reasons.
+* Autoloop can now be configured on a per-peer basis, rather than only on an
+  individual channel level. This change allows desired liquidity thresholds 
+  to be set for an individual peer, rather than a specific channel, and 
+  leverages multi-loop-out to more efficiently manage liquidity. To configure
+  peer-level rules, provide the 'setrule' command with the peer's pubkey. 
 
 #### Breaking Changes
 * The `AutoOut`, `AutoOutBudgetSat` and `AutoOutBudgetStartSec` fields in the
