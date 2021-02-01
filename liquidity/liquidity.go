@@ -216,6 +216,10 @@ type Config struct {
 	LoopOutQuote func(ctx context.Context,
 		request *loop.LoopOutQuoteRequest) (*loop.LoopOutQuote, error)
 
+	// LoopInQuote
+	LoopInQuote func(ctx context.Context,
+		request *loop.LoopInQuoteRequest) (*loop.LoopInQuote, error)
+
 	// LoopOut dispatches a loop out.
 	LoopOut func(ctx context.Context, request *loop.OutRequest) (
 		*loop.LoopOutSwapInfo, error)
@@ -650,6 +654,9 @@ type Suggestions struct {
 	// OutSwaps is the set of loop out swaps that we suggest executing.
 	OutSwaps []loop.OutRequest
 
+	// InSwaps is the set of loop in swaps that we suggest executing.
+	InSwaps []loop.LoopInRequest
+
 	// DisqualifiedChans maps the set of channels that we do not recommend
 	// swaps on to the reason that we did not recommend a swap.
 	DisqualifiedChans map[lnwire.ShortChannelID]Reason
@@ -765,7 +772,7 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoloop bool) (
 
 	// Get a summary of our existing swaps so that we can check our autoloop
 	// budget.
-	summary, err := m.checkExistingAutoLoops(ctx, loopOut)
+	summary, err := m.checkExistingAutoLoops(ctx, loopOut, loopIn)
 	if err != nil {
 		return nil, err
 	}
@@ -1108,6 +1115,10 @@ func worstCaseOutFees(prepayRouting, swapRouting, swapFee, minerFee,
 	return successFees
 }
 
+func worstCaseInFees(minerFee, swapFee btcutil.Amount) btcutil.Amount {
+	return 0
+}
+
 // existingAutoLoopSummary provides a summary of the existing autoloops which
 // were dispatched during our current budget period.
 type existingAutoLoopSummary struct {
@@ -1137,7 +1148,8 @@ func (e *existingAutoLoopSummary) totalFees() btcutil.Amount {
 // total for our set of ongoing, automatically dispatched swaps as well as a
 // current in-flight count.
 func (m *Manager) checkExistingAutoLoops(ctx context.Context,
-	loopOuts []*loopdb.LoopOut) (*existingAutoLoopSummary, error) {
+	loopOuts []*loopdb.LoopOut,
+	loopIns []*loopdb.LoopIn) (*existingAutoLoopSummary, error) {
 
 	var summary existingAutoLoopSummary
 
@@ -1173,6 +1185,18 @@ func (m *Manager) checkExistingAutoLoops(ctx context.Context,
 			)
 		} else if !out.LastUpdateTime().Before(m.params.AutoFeeStartDate) {
 			summary.spentFees += out.State().Cost.Total()
+		}
+	}
+
+	for _, in := range loopIns {
+		if in.Contract.Label != labels.AutoloopLabel(false) {
+			continue
+		}
+
+		if in.State().State.Type() == loopdb.StateTypePending {
+			// TODO(carla): add worst case loop in fees.
+		} else if !in.LastUpdateTime().Before(m.params.AutoFeeStartDate) {
+			summary.spentFees += in.State().Cost.Total()
 		}
 	}
 
