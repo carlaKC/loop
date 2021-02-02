@@ -574,6 +574,17 @@ func newSuggestions() *Suggestions {
 	}
 }
 
+func (s *Suggestions) addSwap(swap swapSuggestion) error {
+	out, ok := swap.(*loopOutSwapSuggestion)
+	if !ok {
+		return fmt.Errorf("unexpected swap type: %T", swap)
+	}
+
+	s.OutSwaps = append(s.OutSwaps, out.OutRequest)
+
+	return nil
+}
+
 // singleReasonSuggestion is a helper function which returns a set of
 // suggestions where all of our rules are disqualified due to a reason that
 // applies to all of them (such as being out of budget).
@@ -693,7 +704,7 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoloop bool) (
 	traffic := m.ineligibleChannels(loopOut, loopIn)
 
 	var (
-		suggestions  []loop.OutRequest
+		suggestions  []swapSuggestion
 		disqualified = make(map[lnwire.ShortChannelID]Reason)
 	)
 
@@ -717,7 +728,7 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoloop bool) (
 			continue
 		}
 
-		suggestions = append(suggestions, *suggestion)
+		suggestions = append(suggestions, suggestion)
 	}
 
 	// Finally, run through all possible swaps, excluding swaps that are
@@ -734,25 +745,28 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoloop bool) (
 
 	// Sort suggestions by amount in descending order.
 	sort.SliceStable(suggestions, func(i, j int) bool {
-		return suggestions[i].Amount > suggestions[j].Amount
+		return suggestions[i].amount() > suggestions[j].amount()
 	})
 
 	// Run through our suggested swaps in descending order of amount and
 	// return all of the swaps which will fit within our remaining budget.
 	available := m.params.AutoFeeBudget - summary.totalFees()
 
+	// setReason is a helper function which sets a reason for disqualifying
+	// a swap in our response.
+	setReason := func(s swapSuggestion, r Reason) {
+		for _, channel := range s.channels() {
+			_, ok := m.params.ChannelRules[channel]
+			if !ok {
+				continue
+			}
+
+			resp.DisqualifiedChans[channel] = r
+		}
+	}
+
 	for _, swap := range suggestions {
 		swap := swap
-
-		// setReason is a helper that adds a swap's channels to our
-		// disqualified list with the reason provided.
-		setReason := func(reason Reason) {
-			for _, id := range swap.OutgoingChanSet {
-				chanID := lnwire.NewShortChanIDFromInt(id)
-
-				resp.DisqualifiedChans[chanID] = reason
-			}
-		}
 
 		// If we do not have enough funds available, or we hit our
 		// in flight limit, we record this value for the rest of the
@@ -767,23 +781,23 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoloop bool) (
 		}
 
 		if reason != ReasonNone {
-			setReason(reason)
+			setReason(swap, reason)
 			continue
 		}
 
-		fees := worstCaseOutFees(
-			swap.MaxPrepayRoutingFee, swap.MaxSwapRoutingFee,
-			swap.MaxSwapFee, swap.MaxMinerFee, swap.MaxPrepayAmount,
-		)
+		fees := swap.fees()
 
 		// If the maximum fee we expect our swap to use is less than the
 		// amount we have available, we add it to our set of swaps that
 		// fall within the budget and decrement our available amount.
 		if fees <= available {
 			available -= fees
-			resp.OutSwaps = append(resp.OutSwaps, swap)
+
+			if err := resp.addSwap(swap); err != nil {
+				return nil, err
+			}
 		} else {
-			setReason(ReasonBudgetInsufficient)
+			setReason(swap, ReasonBudgetInsufficient)
 		}
 	}
 
@@ -794,7 +808,7 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoloop bool) (
 // swap request for the rule provided.
 func (m *Manager) suggestSwap(ctx context.Context, traffic *swapTraffic,
 	balance *balances, rule *ThresholdRule, restrictions *Restrictions,
-	autoloop bool) (*loop.OutRequest, Reason, error) {
+	autoloop bool) (swapSuggestion, Reason, error) {
 
 	// Check whether we can perform a swap, adding the channel to
 	// our set of disqualified swaps if it is not eligible.
@@ -810,7 +824,18 @@ func (m *Manager) suggestSwap(ctx context.Context, traffic *swapTraffic,
 		return nil, ReasonLiquidityOk, nil
 	}
 
-	return m.loopOutSwap(ctx, amount, balance, autoloop)
+	swap, reason, err := m.loopOutSwap(ctx, amount, balance, autoloop)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if reason != ReasonNone {
+		return nil, reason, nil
+	}
+
+	return &loopOutSwapSuggestion{
+		OutRequest: *swap,
+	}, ReasonNone, nil
 }
 
 func (m *Manager) loopOutSwap(ctx context.Context, amount btcutil.Amount,
