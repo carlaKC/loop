@@ -477,6 +477,12 @@ enum SwapState {
     paid, but we are still waiting for the htlc spend to confirm.
     */
     INVOICE_SETTLED = 5;
+
+    /*
+    HTLC_CONFIRMED is reached when the on-chain htlc from the server for a loop
+    out swap has reached sufficient confirmations.
+    */
+    HTLC_CONFIRMED = 6;
 }
 
 enum FailureReason {

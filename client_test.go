@@ -314,6 +314,15 @@ func testSuccess(ctx *testContext, amt btcutil.Amount, hash lntypes.Hash,
 
 	htlcOutpoint := ctx.publishHtlc(confIntent.PkScript, amt)
 
+	// If our preimage is not yet revealed, we expect to set our htlc
+	// confirmed state.
+	if !preimageRevealed {
+		ctx.store.assertLoopOutState(
+			loopdb.StateHtlcConfirmed, &htlcOutpoint.Hash,
+		)
+		ctx.assertStatus(loopdb.StateHtlcConfirmed)
+	}
+
 	signalPrepaymentResult(nil)
 
 	ctx.AssertRegisterSpendNtfn(confIntent.PkScript)

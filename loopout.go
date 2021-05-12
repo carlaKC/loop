@@ -640,7 +640,13 @@ func (s *loopOutSwap) waitForConfirmedHtlc(globalCtx context.Context) (
 	}
 
 	var txConf *chainntnfs.TxConfirmation
-	if s.state == loopdb.StateInitiated {
+	// Check whether we've reached our maximum height for initiated or
+	// htlc confirmed swaps, because in both cases we have not yet committed
+	// to the swap by revealing the preimage, so we can still back out if
+	// it's too late.
+	if s.state == loopdb.StateInitiated ||
+		s.state == loopdb.StateHtlcConfirmed {
+
 		// First check, because after resume we may otherwise reveal the
 		// preimage after the max height (depending on order in which
 		// events are received in the select loop below).
@@ -725,9 +731,18 @@ func (s *loopOutSwap) waitForConfirmedHtlc(globalCtx context.Context) (
 	htlcTxHash := txConf.Tx.TxHash()
 	s.log.Infof("Htlc tx %v at height %v", htlcTxHash, txConf.BlockHeight)
 
+	// If we're still in an initiated state, we update our swap to reflect
+	// that we've seen a confirmed htlc. We *must not* update our state
+	// otherwise, because we may be in a preimage revealed state, so
+	// reverting to StateHtlcConfirmed would move our state machine
+	// backwards.
 	s.htlcTxHash = &htlcTxHash
+	if s.state == loopdb.StateInitiated {
+		s.state = loopdb.StateHtlcConfirmed
+		err = s.persistState(ctx)
+	}
 
-	return txConf, nil
+	return txConf, err
 }
 
 // checkMaxRevealHeightExceeded returns a boolean indicating whether we have

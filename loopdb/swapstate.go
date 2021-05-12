@@ -64,6 +64,10 @@ const (
 	// StateFailIncorrectHtlcAmt indicates that the amount of an externally
 	// published loop in htlc didn't match the swap amount.
 	StateFailIncorrectHtlcAmt SwapState = 10
+
+	// StateHtlcConfirmed indicates that an on-chain htlc from the server
+	// for a loop out swap has confirmed on-chain.
+	StateHtlcConfirmed SwapState = 11
 )
 
 // SwapStateType defines the types of swap states that exist. Every swap state
@@ -86,7 +90,7 @@ const (
 func (s SwapState) Type() SwapStateType {
 	if s == StateInitiated || s == StateHtlcPublished ||
 		s == StatePreimageRevealed || s == StateFailTemporary ||
-		s == StateInvoiceSettled {
+		s == StateInvoiceSettled || s == StateHtlcConfirmed {
 
 		return StateTypePending
 	}
@@ -133,6 +137,9 @@ func (s SwapState) String() string {
 
 	case StateFailIncorrectHtlcAmt:
 		return "IncorrectHtlcAmt"
+
+	case StateHtlcConfirmed:
+		return "HtlcConfirmed"
 
 	default:
 		return "Unknown"

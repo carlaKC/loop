@@ -302,6 +302,11 @@ func TestCustomSweepConfTarget(t *testing.T) {
 	ctx.NotifyConf(htlcTx)
 	hash := htlcTx.TxHash()
 
+	// Expect our confirmed state to be persisted.
+	store.assertLoopOutState(loopdb.StateHtlcConfirmed, &hash)
+	status := <-statusChan
+	require.Equal(t, loopdb.StateHtlcConfirmed, status.State)
+
 	// The client should then register for a spend of the HTLC and attempt
 	// to sweep it using the custom confirmation target.
 	ctx.AssertRegisterSpendNtfn(swap.htlc.PkScript)
@@ -317,7 +322,7 @@ func TestCustomSweepConfTarget(t *testing.T) {
 
 	store.assertLoopOutState(loopdb.StatePreimageRevealed, &hash)
 
-	status := <-statusChan
+	status = <-statusChan
 	if status.State != loopdb.StatePreimageRevealed {
 		t.Fatalf("expected state %v, got %v",
 			loopdb.StatePreimageRevealed, status.State)
@@ -496,6 +501,11 @@ func TestPreimagePush(t *testing.T) {
 	ctx.NotifyConf(htlcTx)
 	hash := htlcTx.TxHash()
 
+	// Expect our confirmed state to be persisted.
+	store.assertLoopOutState(loopdb.StateHtlcConfirmed, &hash)
+	status := <-statusChan
+	require.Equal(t, loopdb.StateHtlcConfirmed, status.State)
+
 	// The client should then register for a spend of the HTLC and attempt
 	// to sweep it using the custom confirmation target.
 	ctx.AssertRegisterSpendNtfn(swap.htlc.PkScript)
@@ -526,7 +536,7 @@ func TestPreimagePush(t *testing.T) {
 	// This is the first time we have swept, so we expect our preimage
 	// revealed state to be set.
 	store.assertLoopOutState(loopdb.StatePreimageRevealed, &hash)
-	status := <-statusChan
+	status = <-statusChan
 	require.Equal(
 		t, status.State, loopdb.StatePreimageRevealed,
 	)
@@ -662,6 +672,12 @@ func TestExpiryBeforeReveal(t *testing.T) {
 		PkScript: swap.htlc.PkScript,
 	})
 	ctx.NotifyConf(htlcTx)
+	hash := htlcTx.TxHash()
+
+	// Expect our confirmed state to be persisted.
+	store.assertLoopOutState(loopdb.StateHtlcConfirmed, &hash)
+	status := <-statusChan
+	require.Equal(t, loopdb.StateHtlcConfirmed, status.State)
 
 	// The client should then register for a spend of the HTLC and attempt
 	// to sweep it using the custom confirmation target.
