@@ -438,6 +438,12 @@ func (s *loopOutSwap) executeSwap(globalCtx context.Context) error {
 		return err
 	}
 
+	// If spend details are nil, we resolved the swap without waiting for
+	// its spend, so we can exit.
+	if spendDetails == nil {
+		return nil
+	}
+
 	// Inspect witness stack to see if it is a success transaction. We
 	// don't just try to match with the hash of our sweep tx, because it
 	// may be swept by a different (fee) sweep tx from a previous run.
@@ -873,6 +879,14 @@ func (s *loopOutSwap) waitForHtlcSpendConfirmed(globalCtx context.Context,
 				return nil, err
 			}
 
+			// If the result of our spend func was that the swap
+			// has reached a final state, then we return nil spend
+			// details, because there is no further action required
+			// for this swap.
+			if s.state.Type() != loopdb.StateTypePending {
+				return nil, nil
+			}
+
 			// If our off chain payment is not yet complete, we
 			// try to push our preimage to the server.
 			if !paymentComplete {
@@ -919,21 +933,37 @@ func (s *loopOutSwap) sweep(ctx context.Context,
 		return s.htlc.GenSuccessWitness(sig, s.Preimage)
 	}
 
+	remainingBlocks := s.CltvExpiry - s.height
+	blocksToLastReveal := remainingBlocks - MinLoopOutPreimageRevealDelta
+	preimageRevealed := s.state == loopdb.StatePreimageRevealed
+
 	// Calculate the transaction fee based on the confirmation target
 	// required to sweep the HTLC before the timeout. We'll use the
 	// confirmation target provided by the client unless we've come too
 	// close to the expiration height, in which case we'll use the default
 	// if it is better than what the client provided.
 	confTarget := s.SweepConfTarget
-	if s.CltvExpiry-s.height <= DefaultSweepConfTargetDelta &&
+	if remainingBlocks <= DefaultSweepConfTargetDelta &&
 		confTarget > DefaultSweepConfTarget {
+
 		confTarget = DefaultSweepConfTarget
 	}
+
 	fee, err := s.sweeper.GetSweepFee(
 		ctx, s.htlc.AddSuccessToEstimator, s.DestAddr, confTarget,
 	)
 	if err != nil {
 		return err
+	}
+
+	// If we have not revealed our preimage, and we don't have time left
+	// to sweep the swap, we abandon the swap because we can no longer
+	// sweep the success path (without potentially having to compete with
+	// the server's timeout sweep), and we have not had any coins pulled
+	// off-chain.
+	if blocksToLastReveal <= 0 && !preimageRevealed {
+		s.state = loopdb.StateFailTimeout
+		return nil
 	}
 
 	// Ensure it doesn't exceed our maximum fee allowed.
