@@ -641,36 +641,13 @@ func (s *loopOutSwap) waitForConfirmedHtlc(globalCtx context.Context) (
 
 	var txConf *chainntnfs.TxConfirmation
 	if s.state == loopdb.StateInitiated {
-		// Check if it is already too late to start this swap. If we
-		// already revealed the preimage, this check is irrelevant and
-		// we need to sweep in any case.
-		maxPreimageRevealHeight := s.CltvExpiry -
-			MinLoopOutPreimageRevealDelta
-
-		checkMaxRevealHeightExceeded := func() bool {
-			s.log.Infof("Checking preimage reveal height %v "+
-				"exceeded (height %v)",
-				maxPreimageRevealHeight, s.height)
-
-			if s.height <= maxPreimageRevealHeight {
-				return false
-			}
-
-			s.log.Infof("Max preimage reveal height %v "+
-				"exceeded (height %v)",
-				maxPreimageRevealHeight, s.height)
-
-			s.state = loopdb.StateFailTimeout
-
-			return true
-		}
-
 		// First check, because after resume we may otherwise reveal the
 		// preimage after the max height (depending on order in which
 		// events are received in the select loop below).
-		if checkMaxRevealHeightExceeded() {
+		if s.checkMaxRevealHeightExceeded() {
 			return nil, nil
 		}
+
 		s.log.Infof("Waiting for either htlc on-chain confirmation or " +
 			" off-chain payment failure")
 	loop:
@@ -721,7 +698,7 @@ func (s *loopOutSwap) waitForConfirmedHtlc(globalCtx context.Context) (
 
 				log.Infof("Received block %v", s.height)
 
-				if checkMaxRevealHeightExceeded() {
+				if s.checkMaxRevealHeightExceeded() {
 					return nil, nil
 				}
 
@@ -751,6 +728,33 @@ func (s *loopOutSwap) waitForConfirmedHtlc(globalCtx context.Context) (
 	s.htlcTxHash = &htlcTxHash
 
 	return txConf, nil
+}
+
+// checkMaxRevealHeightExceeded returns a boolean indicating whether we have
+// passed the height at which we can safely reveal our preimage, taking a safe
+// broadcast delta into account. If we have already revealed our preimage, then
+// this check is always false because we need to continue trying to sweep once
+// the preimage is public.
+func (s *loopOutSwap) checkMaxRevealHeightExceeded() bool {
+	if s.state == loopdb.StatePreimageRevealed {
+		return false
+	}
+
+	maxPreimageRevealHeight := s.CltvExpiry - MinLoopOutPreimageRevealDelta
+
+	s.log.Infof("Checking preimage reveal height %v exceeded (height %v)",
+		maxPreimageRevealHeight, s.height)
+
+	if s.height <= maxPreimageRevealHeight {
+		return false
+	}
+
+	s.log.Infof("Max preimage reveal height %v exceeded (height %v)",
+		maxPreimageRevealHeight, s.height)
+
+	s.state = loopdb.StateFailTimeout
+
+	return true
 }
 
 // waitForHtlcSpendConfirmed waits for the htlc to be spent either by our own
