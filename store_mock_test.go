@@ -5,9 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+
 	"github.com/lightninglabs/loop/loopdb"
 	"github.com/lightninglabs/loop/test"
 	"github.com/lightningnetwork/lnd/lntypes"
+	"github.com/stretchr/testify/require"
 )
 
 // storeMock implements a mock client swap store.
@@ -200,13 +203,14 @@ func (s *storeMock) assertLoopOutStored() {
 	}
 }
 
-func (s *storeMock) assertLoopOutState(expectedState loopdb.SwapState) {
+func (s *storeMock) assertLoopOutState(state loopdb.SwapState,
+	htlc *chainhash.Hash) {
+
 	s.t.Helper()
 
-	state := <-s.loopOutUpdateChan
-	if state.State != expectedState {
-		s.t.Fatalf("expected state %v, got %v", expectedState, state)
-	}
+	update := <-s.loopOutUpdateChan
+	require.Equal(s.t, state, update.State)
+	require.Equal(s.t, htlc, update.HtlcTxHash)
 }
 
 func (s *storeMock) assertLoopInStored() {

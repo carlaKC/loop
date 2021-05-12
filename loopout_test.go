@@ -237,9 +237,8 @@ func TestCustomSweepConfTarget(t *testing.T) {
 	ctx.Lnd.SetFeeEstimate(testReq.SweepConfTarget, 250)
 	ctx.Lnd.SetFeeEstimate(DefaultSweepConfTarget, 10000)
 
-	cfg := newSwapConfig(
-		&lnd.LndServices, newStoreMock(t), server,
-	)
+	store := newStoreMock(t)
+	cfg := newSwapConfig(&lnd.LndServices, store, server)
 
 	initResult, err := newLoopOutSwap(
 		context.Background(), cfg, ctx.Lnd.Height, &testReq,
@@ -275,7 +274,7 @@ func TestCustomSweepConfTarget(t *testing.T) {
 	}()
 
 	// The swap should be found in its initial state.
-	cfg.store.(*storeMock).assertLoopOutStored()
+	store.assertLoopOutStored()
 	state := <-statusChan
 	if state.State != loopdb.StateInitiated {
 		t.Fatal("unexpected state")
@@ -301,6 +300,7 @@ func TestCustomSweepConfTarget(t *testing.T) {
 	})
 
 	ctx.NotifyConf(htlcTx)
+	hash := htlcTx.TxHash()
 
 	// The client should then register for a spend of the HTLC and attempt
 	// to sweep it using the custom confirmation target.
@@ -315,7 +315,8 @@ func TestCustomSweepConfTarget(t *testing.T) {
 	// Expect a signing request for the HTLC success transaction.
 	<-ctx.Lnd.SignOutputRawChannel
 
-	cfg.store.(*storeMock).assertLoopOutState(loopdb.StatePreimageRevealed)
+	store.assertLoopOutState(loopdb.StatePreimageRevealed, &hash)
+
 	status := <-statusChan
 	if status.State != loopdb.StatePreimageRevealed {
 		t.Fatalf("expected state %v, got %v",
@@ -328,9 +329,9 @@ func TestCustomSweepConfTarget(t *testing.T) {
 		t.Helper()
 
 		sweepTx := ctx.ReceiveTx()
-		if sweepTx.TxIn[0].PreviousOutPoint.Hash != htlcTx.TxHash() {
+		if sweepTx.TxIn[0].PreviousOutPoint.Hash != hash {
 			t.Fatalf("expected sweep tx to spend %v, got %v",
-				htlcTx.TxHash(), sweepTx.TxIn[0].PreviousOutPoint)
+				hash, sweepTx.TxIn[0].PreviousOutPoint)
 		}
 
 		// The fee used for the sweep transaction is an estimate based
@@ -393,7 +394,8 @@ func TestCustomSweepConfTarget(t *testing.T) {
 	// Notify the spend so that the swap reaches its final state.
 	ctx.NotifySpend(sweepTx, 0)
 
-	cfg.store.(*storeMock).assertLoopOutState(loopdb.StateSuccess)
+	store.assertLoopOutState(loopdb.StateSuccess, &hash)
+
 	status = <-statusChan
 	if status.State != loopdb.StateSuccess {
 		t.Fatalf("expected state %v, got %v", loopdb.StateSuccess,
@@ -435,9 +437,8 @@ func TestPreimagePush(t *testing.T) {
 		),
 	)
 
-	cfg := newSwapConfig(
-		&lnd.LndServices, newStoreMock(t), server,
-	)
+	store := newStoreMock(t)
+	cfg := newSwapConfig(&lnd.LndServices, store, server)
 
 	initResult, err := newLoopOutSwap(
 		context.Background(), cfg, ctx.Lnd.Height, &testReq,
@@ -469,7 +470,7 @@ func TestPreimagePush(t *testing.T) {
 	}()
 
 	// The swap should be found in its initial state.
-	cfg.store.(*storeMock).assertLoopOutStored()
+	store.assertLoopOutStored()
 	state := <-statusChan
 	require.Equal(t, loopdb.StateInitiated, state.State)
 
@@ -493,6 +494,7 @@ func TestPreimagePush(t *testing.T) {
 	})
 
 	ctx.NotifyConf(htlcTx)
+	hash := htlcTx.TxHash()
 
 	// The client should then register for a spend of the HTLC and attempt
 	// to sweep it using the custom confirmation target.
@@ -510,9 +512,8 @@ func TestPreimagePush(t *testing.T) {
 
 	// Now we decrease our fees for the swap's confirmation target to less
 	// than the maximum miner fee.
-	ctx.Lnd.SetFeeEstimate(testReq.SweepConfTarget, chainfee.SatPerKWeight(
-		testReq.MaxMinerFee/2,
-	))
+	feeRate := chainfee.SatPerKWeight(testReq.MaxMinerFee / 2)
+	ctx.Lnd.SetFeeEstimate(testReq.SweepConfTarget, feeRate)
 
 	// Now when we report a new block and tick our expiry fee timer, and
 	// fees are acceptably low so we expect our sweep to be published.
@@ -524,7 +525,7 @@ func TestPreimagePush(t *testing.T) {
 
 	// This is the first time we have swept, so we expect our preimage
 	// revealed state to be set.
-	cfg.store.(*storeMock).assertLoopOutState(loopdb.StatePreimageRevealed)
+	store.assertLoopOutState(loopdb.StatePreimageRevealed, &hash)
 	status := <-statusChan
 	require.Equal(
 		t, status.State, loopdb.StatePreimageRevealed,
@@ -573,7 +574,7 @@ func TestPreimagePush(t *testing.T) {
 	// spend our our sweepTx and assert that the swap succeeds.
 	ctx.NotifySpend(sweepTx, 0)
 
-	cfg.store.(*storeMock).assertLoopOutState(loopdb.StateSuccess)
+	store.assertLoopOutState(loopdb.StateSuccess, &hash)
 	status = <-statusChan
 	require.Equal(
 		t, status.State, loopdb.StateSuccess,
@@ -603,9 +604,9 @@ func TestExpiryBeforeReveal(t *testing.T) {
 	))
 
 	// Setup the cfg using mock server and init a loop out request.
-	cfg := newSwapConfig(
-		&lnd.LndServices, newStoreMock(t), server,
-	)
+	store := newStoreMock(t)
+	cfg := newSwapConfig(&lnd.LndServices, store, server)
+
 	initResult, err := newLoopOutSwap(
 		context.Background(), cfg, ctx.Lnd.Height, &testReq,
 	)
@@ -637,7 +638,7 @@ func TestExpiryBeforeReveal(t *testing.T) {
 	}()
 
 	// The swap should be found in its initial state.
-	cfg.store.(*storeMock).assertLoopOutStored()
+	store.assertLoopOutStored()
 	state := <-statusChan
 	require.Equal(t, loopdb.StateInitiated, state.State)
 
