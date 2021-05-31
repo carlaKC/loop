@@ -76,3 +76,4 @@ install:
 rpc:
 	@$(call print, "Compiling RPC protos.")
 	cd looprpc; ./gen_protos.sh
+	cd serverrpc; ./gen_protos.sh

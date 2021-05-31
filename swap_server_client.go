@@ -16,7 +16,7 @@ import (
 	"github.com/btcsuite/btcutil"
 	"github.com/lightninglabs/aperture/lsat"
 	"github.com/lightninglabs/loop/loopdb"
-	"github.com/lightninglabs/loop/looprpc"
+	"github.com/lightninglabs/loop/serverrpc"
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lntypes"
 	"github.com/lightningnetwork/lnd/routing/route"
@@ -82,7 +82,7 @@ type swapServerClient interface {
 }
 
 type grpcSwapServerClient struct {
-	server looprpc.SwapServerClient
+	server serverrpc.SwapServerClient
 	conn   *grpc.ClientConn
 
 	wg sync.WaitGroup
@@ -117,7 +117,7 @@ func newSwapServerClient(cfg *ClientConfig, lsatStore lsat.Store) (
 		return nil, err
 	}
 
-	server := looprpc.NewSwapServerClient(serverConn)
+	server := serverrpc.NewSwapServerClient(serverConn)
 
 	return &grpcSwapServerClient{
 		conn:   serverConn,
@@ -131,7 +131,7 @@ func (s *grpcSwapServerClient) GetLoopOutTerms(ctx context.Context) (
 	rpcCtx, rpcCancel := context.WithTimeout(ctx, globalCallTimeout)
 	defer rpcCancel()
 	terms, err := s.server.LoopOutTerms(rpcCtx,
-		&looprpc.ServerLoopOutTermsRequest{
+		&serverrpc.ServerLoopOutTermsRequest{
 			ProtocolVersion: loopdb.CurrentRPCProtocolVersion,
 		},
 	)
@@ -154,7 +154,7 @@ func (s *grpcSwapServerClient) GetLoopOutQuote(ctx context.Context,
 	rpcCtx, rpcCancel := context.WithTimeout(ctx, globalCallTimeout)
 	defer rpcCancel()
 	quoteResp, err := s.server.LoopOutQuote(rpcCtx,
-		&looprpc.ServerLoopOutQuoteRequest{
+		&serverrpc.ServerLoopOutQuoteRequest{
 			Amt:                     uint64(amt),
 			SwapPublicationDeadline: swapPublicationDeadline.Unix(),
 			ProtocolVersion:         loopdb.CurrentRPCProtocolVersion,
@@ -188,7 +188,7 @@ func (s *grpcSwapServerClient) GetLoopInTerms(ctx context.Context) (
 	rpcCtx, rpcCancel := context.WithTimeout(ctx, globalCallTimeout)
 	defer rpcCancel()
 	terms, err := s.server.LoopInTerms(rpcCtx,
-		&looprpc.ServerLoopInTermsRequest{
+		&serverrpc.ServerLoopInTermsRequest{
 			ProtocolVersion: loopdb.CurrentRPCProtocolVersion,
 		},
 	)
@@ -208,7 +208,7 @@ func (s *grpcSwapServerClient) GetLoopInQuote(ctx context.Context,
 	rpcCtx, rpcCancel := context.WithTimeout(ctx, globalCallTimeout)
 	defer rpcCancel()
 	quoteResp, err := s.server.LoopInQuote(rpcCtx,
-		&looprpc.ServerLoopInQuoteRequest{
+		&serverrpc.ServerLoopInQuoteRequest{
 			Amt:             uint64(amt),
 			ProtocolVersion: loopdb.CurrentRPCProtocolVersion,
 		},
@@ -231,7 +231,7 @@ func (s *grpcSwapServerClient) NewLoopOutSwap(ctx context.Context,
 	rpcCtx, rpcCancel := context.WithTimeout(ctx, globalCallTimeout)
 	defer rpcCancel()
 	swapResp, err := s.server.NewLoopOutSwap(rpcCtx,
-		&looprpc.ServerLoopOutRequest{
+		&serverrpc.ServerLoopOutRequest{
 			SwapHash:                swapHash[:],
 			Amt:                     uint64(amount),
 			ReceiverKey:             receiverKey[:],
@@ -270,7 +270,7 @@ func (s *grpcSwapServerClient) PushLoopOutPreimage(ctx context.Context,
 	defer rpcCancel()
 
 	_, err := s.server.LoopOutPushPreimage(rpcCtx,
-		&looprpc.ServerLoopOutPushPreimageRequest{
+		&serverrpc.ServerLoopOutPushPreimageRequest{
 			ProtocolVersion: loopdb.CurrentRPCProtocolVersion,
 			Preimage:        preimage[:],
 		},
@@ -287,7 +287,7 @@ func (s *grpcSwapServerClient) NewLoopInSwap(ctx context.Context,
 	rpcCtx, rpcCancel := context.WithTimeout(ctx, globalCallTimeout)
 	defer rpcCancel()
 
-	req := &looprpc.ServerLoopInRequest{
+	req := &serverrpc.ServerLoopInRequest{
 		SwapHash:        swapHash[:],
 		Amt:             uint64(amount),
 		SenderKey:       senderKey[:],
@@ -324,7 +324,7 @@ func (s *grpcSwapServerClient) NewLoopInSwap(ctx context.Context,
 // ServerUpdate summarizes an update from the swap server.
 type ServerUpdate struct {
 	// State is the state that the server has sent us.
-	State looprpc.ServerSwapState
+	State serverrpc.ServerSwapState
 
 	// Timestamp is the time of the server state update.
 	Timestamp time.Time
@@ -336,7 +336,7 @@ func (s *grpcSwapServerClient) SubscribeLoopInUpdates(ctx context.Context,
 	hash lntypes.Hash) (<-chan *ServerUpdate, <-chan error, error) {
 
 	resp, err := s.server.SubscribeLoopInUpdates(
-		ctx, &looprpc.SubscribeUpdatesRequest{
+		ctx, &serverrpc.SubscribeUpdatesRequest{
 			ProtocolVersion: loopdb.CurrentRPCProtocolVersion,
 			SwapHash:        hash[:],
 		},
@@ -367,7 +367,7 @@ func (s *grpcSwapServerClient) SubscribeLoopOutUpdates(ctx context.Context,
 	hash lntypes.Hash) (<-chan *ServerUpdate, <-chan error, error) {
 
 	resp, err := s.server.SubscribeLoopOutUpdates(
-		ctx, &looprpc.SubscribeUpdatesRequest{
+		ctx, &serverrpc.SubscribeUpdatesRequest{
 			ProtocolVersion: loopdb.CurrentRPCProtocolVersion,
 			SwapHash:        hash[:],
 		},
@@ -506,7 +506,7 @@ type outCancelDetails struct {
 func (s *grpcSwapServerClient) CancelLoopOutSwap(ctx context.Context,
 	details *outCancelDetails) error {
 
-	req := &looprpc.CancelLoopOutSwapRequest{
+	req := &serverrpc.CancelLoopOutSwapRequest{
 		ProtocolVersion: loopdb.CurrentRPCProtocolVersion,
 		SwapHash:        details.hash[:],
 		PaymentAddress:  details.paymentAddr[:],
@@ -523,22 +523,22 @@ func (s *grpcSwapServerClient) CancelLoopOutSwap(ctx context.Context,
 }
 
 func rpcRouteCancel(details *outCancelDetails) (
-	*looprpc.CancelLoopOutSwapRequest_RouteCancel, error) {
+	*serverrpc.CancelLoopOutSwapRequest_RouteCancel, error) {
 
-	attempts := make([]*looprpc.HtlcAttempt, len(details.metadata.attempts))
+	attempts := make([]*serverrpc.HtlcAttempt, len(details.metadata.attempts))
 	for i, remaining := range details.metadata.attempts {
-		attempts[i] = &looprpc.HtlcAttempt{
+		attempts[i] = &serverrpc.HtlcAttempt{
 			RemainingHops: remaining,
 		}
 	}
 
-	resp := &looprpc.CancelLoopOutSwapRequest_RouteCancel{
-		RouteCancel: &looprpc.RouteCancel{
+	resp := &serverrpc.CancelLoopOutSwapRequest_RouteCancel{
+		RouteCancel: &serverrpc.RouteCancel{
 			Attempts: attempts,
 			// We can cast our lnd failure reason to a loop payment
 			// failure reason because these values are copied 1:1
 			// from lnd.
-			Failure: looprpc.PaymentFailureReason(
+			Failure: serverrpc.PaymentFailureReason(
 				details.metadata.failureReason,
 			),
 		},
@@ -546,10 +546,10 @@ func rpcRouteCancel(details *outCancelDetails) (
 
 	switch details.metadata.paymentType {
 	case paymentTypePrepay:
-		resp.RouteCancel.RouteType = looprpc.RoutePaymentType_PREPAY_ROUTE
+		resp.RouteCancel.RouteType = serverrpc.RoutePaymentType_PREPAY_ROUTE
 
 	case paymentTypeInvoice:
-		resp.RouteCancel.RouteType = looprpc.RoutePaymentType_INVOICE_ROUTE
+		resp.RouteCancel.RouteType = serverrpc.RoutePaymentType_INVOICE_ROUTE
 
 	default:
 		return nil, fmt.Errorf("unknown payment type: %v",

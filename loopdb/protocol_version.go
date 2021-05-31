@@ -3,7 +3,7 @@ package loopdb
 import (
 	"math"
 
-	"github.com/lightninglabs/loop/looprpc"
+	"github.com/lightninglabs/loop/serverrpc"
 )
 
 // ProtocolVersion represents the protocol version (declared on rpc level) that
@@ -49,7 +49,7 @@ const (
 
 	// CurrentRPCProtocolVersion defines the version of the RPC protocol
 	// that is currently supported by the loop client.
-	CurrentRPCProtocolVersion = looprpc.ProtocolVersion_LOOP_OUT_CANCEL
+	CurrentRPCProtocolVersion = serverrpc.ProtocolVersion_LOOP_OUT_CANCEL
 
 	// CurrentInternalProtocolVersion defines the RPC current protocol in
 	// the internal representation.
