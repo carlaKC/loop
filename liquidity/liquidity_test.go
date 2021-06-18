@@ -104,6 +104,13 @@ var (
 		OutgoingChanSet: loopdb.ChannelSet{999},
 	}
 
+	autoInContract = &loopdb.LoopInContract{
+		SwapContract: loopdb.SwapContract{
+			Label:          labels.AutoloopLabel(swap.TypeIn),
+			InitiationTime: testBudgetStart,
+		},
+	}
+
 	testRestrictions = NewRestrictions(1, 10000)
 
 	// noneDisqualified can be used in tests where we don't have any
@@ -1095,9 +1102,10 @@ func TestFeeBudget(t *testing.T) {
 // that are allowed.
 func TestInFlightLimit(t *testing.T) {
 	tests := []struct {
-		name          string
-		maxInFlight   int
-		existingSwaps []*loopdb.LoopOut
+		name            string
+		maxInFlight     int
+		existingSwaps   []*loopdb.LoopOut
+		existingInSwaps []*loopdb.LoopIn
 		// peerRules will only be set (instead of test default values)
 		// is it is non-nil.
 		peerRules   map[route.Vertex]*ThresholdRule
@@ -1166,8 +1174,10 @@ func TestInFlightLimit(t *testing.T) {
 				{
 					Contract: autoOutContract,
 				},
+			},
+			existingInSwaps: []*loopdb.LoopIn{
 				{
-					Contract: autoOutContract,
+					Contract: autoInContract,
 				},
 			},
 			suggestions: &Suggestions{
@@ -1212,6 +1222,9 @@ func TestInFlightLimit(t *testing.T) {
 			cfg, lnd := newTestConfig()
 			cfg.ListLoopOut = func() ([]*loopdb.LoopOut, error) {
 				return testCase.existingSwaps, nil
+			}
+			cfg.ListLoopIn = func() ([]*loopdb.LoopIn, error) {
+				return testCase.existingInSwaps, nil
 			}
 
 			lnd.Channels = []lndclient.ChannelInfo{
