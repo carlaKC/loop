@@ -29,6 +29,11 @@ type FeeLimit interface {
 	// a swap amount and quote.
 	loopOutFees(amount btcutil.Amount, quote *loop.LoopOutQuote) (
 		btcutil.Amount, btcutil.Amount, btcutil.Amount)
+
+	// loopInLimits checks whether the quote provided is withing our fee
+	// limits for the swap amount.
+	loopInLimits(amount btcutil.Amount,
+		quote *loop.LoopInQuote) error
 }
 
 // swapSuggestion is an interface implemented by suggested swaps for our
