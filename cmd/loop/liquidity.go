@@ -257,6 +257,12 @@ var setParamsCommand = cli.Command{
 				"previously had a failed swap will be " +
 				"included in suggestions.",
 		},
+		cli.StringFlag{
+			Name: "type",
+			Usage: "the type of swap to perform, set to out for" +
+				"acquiring inbound liquidity or in for " +
+				"acquiring inbound liquidity",
+		},
 		cli.BoolFlag{
 			Name: "autoloop",
 			Usage: "set to true to enable automated dispatch " +
@@ -314,6 +320,20 @@ func setParams(ctx *cli.Context) error {
 
 	var flagSet, categoriesSet, feePercentSet bool
 
+	if ctx.IsSet("type") {
+		switch ctx.String("type") {
+		case "in":
+			params.SwapType = looprpc.SwapType_LOOP_IN
+
+		case "out":
+			params.SwapType = looprpc.SwapType_LOOP_OUT
+
+		default:
+			return errors.New("please set type to in or out")
+		}
+
+		flagSet = true
+	}
 	// Update our existing parameters with the values provided by cli flags.
 	// Our fee categories and fee percentage are exclusive, so track which
 	// flags are set to ensure that we don't have nonsensical overlap.
