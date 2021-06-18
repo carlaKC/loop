@@ -101,6 +101,7 @@ var (
 	// defaultParameters contains the default parameters that we start our
 	// liquidity manger with.
 	defaultParameters = Parameters{
+		SwapType:        swap.TypeIn,
 		AutoFeeBudget:   defaultBudget,
 		MaxAutoInFlight: defaultMaxInFlight,
 		ChannelRules:    make(map[lnwire.ShortChannelID]*ThresholdRule),
@@ -170,9 +171,17 @@ type Config struct {
 	LoopOutQuote func(ctx context.Context,
 		request *loop.LoopOutQuoteRequest) (*loop.LoopOutQuote, error)
 
+	// LoopInQuote provides a quote for a loop in swap.
+	LoopInQuote func(ctx context.Context,
+		request *loop.LoopInQuoteRequest) (*loop.LoopInQuote, error)
+
 	// LoopOut dispatches a loop out.
 	LoopOut func(ctx context.Context, request *loop.OutRequest) (
 		*loop.LoopOutSwapInfo, error)
+
+	// LoopIn dispatches a loop in swap.
+	LoopIn func(ctx context.Context,
+		request *loop.LoopInRequest) (*loop.LoopInSwapInfo, error)
 
 	// Clock allows easy mocking of time in unit tests.
 	Clock clock.Clock
@@ -185,6 +194,9 @@ type Config struct {
 // Parameters is a set of parameters provided by the user which guide
 // how we assess liquidity.
 type Parameters struct {
+	// SwapType indicates the type of swap we would like to execute.
+	SwapType swap.Type
+
 	// Autoloop enables automatic dispatch of swaps.
 	Autoloop bool
 
@@ -508,7 +520,7 @@ func (m *Manager) autoloop(ctx context.Context) error {
 		// If we don't actually have dispatch of swaps enabled, log
 		// suggestions.
 		if !m.params.Autoloop {
-			log.Debugf("recommended autoloop: %v sats over "+
+			log.Debugf("recommended autoloop out: %v sats over "+
 				"%v", swap.Amount, swap.OutgoingChanSet)
 
 			continue
@@ -524,6 +536,27 @@ func (m *Manager) autoloop(ctx context.Context) error {
 		log.Infof("loop out automatically dispatched: hash: %v, "+
 			"address: %v", loopOut.SwapHash,
 			loopOut.HtlcAddressP2WSH)
+	}
+
+	for _, in := range suggestion.InSwaps {
+		// If we don't actually have dispatch of swaps enabled, log
+		// suggestions.
+		if !m.params.Autoloop {
+			log.Debugf("recommended autoloop in: %v sats over "+
+				"%v", in.Amount, in.LastHop)
+
+			continue
+		}
+
+		in := in
+		loopIn, err := m.cfg.LoopIn(ctx, &in)
+		if err != nil {
+			return err
+		}
+
+		log.Infof("loop in automatically dispatched: hash: %v, "+
+			"address: %v", loopIn.SwapHash,
+			loopIn.HtlcAddressNP2WSH)
 	}
 
 	return nil
@@ -546,6 +579,9 @@ type Suggestions struct {
 	// OutSwaps is the set of loop out swaps that we suggest executing.
 	OutSwaps []loop.OutRequest
 
+	// InSwaps is the set of loop in swaps that we suggest executing.
+	InSwaps []loop.LoopInRequest
+
 	// DisqualifiedChans maps the set of channels that we do not recommend
 	// swaps on to the reason that we did not recommend a swap.
 	DisqualifiedChans map[lnwire.ShortChannelID]Reason
@@ -563,12 +599,17 @@ func newSuggestions() *Suggestions {
 }
 
 func (s *Suggestions) addSwap(swap swapSuggestion) error {
-	out, ok := swap.(*loopOutSwapSuggestion)
-	if !ok {
+	switch t := swap.(type) {
+	case *loopOutSwapSuggestion:
+		s.OutSwaps = append(s.OutSwaps, t.OutRequest)
+
+	case *loopInSwapSuggestion:
+		s.InSwaps = append(s.InSwaps, t.LoopInRequest)
+
+	default:
+
 		return fmt.Errorf("unexpected swap type: %T", swap)
 	}
-
-	s.OutSwaps = append(s.OutSwaps, out.OutRequest)
 
 	return nil
 }
@@ -622,6 +663,8 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoloop bool) (
 	// estimate is to sweep within our target number of confirmations. If
 	// This fee exceeds the fee limit we have set, we will not suggest any
 	// swaps at present.
+	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	// TODO - carla check based on swap type
 	estimate, err := m.cfg.Lnd.WalletKit.EstimateFee(
 		ctx, m.params.SweepConfTarget,
 	)
@@ -641,7 +684,7 @@ func (m *Manager) SuggestSwaps(ctx context.Context, autoloop bool) (
 
 	// Get the current server side restrictions, combined with the client
 	// set restrictions, if any.
-	restrictions, err := m.getSwapRestrictions(ctx, swap.TypeOut)
+	restrictions, err := m.getSwapRestrictions(ctx, m.params.SwapType)
 	if err != nil {
 		return nil, err
 	}
@@ -860,19 +903,16 @@ func (m *Manager) suggestSwap(ctx context.Context, traffic *swapTraffic,
 
 	// We can have nil suggestions in the case where no action is
 	// required, so we skip over them.
-	amount := rule.swapAmount(balance, restrictions)
+	amount := rule.swapAmount(balance, restrictions, m.params.SwapType)
 	if amount == 0 {
 		return nil, newReasonError(ReasonLiquidityOk)
 	}
 
-	swap, err := m.loopOutSwap(ctx, amount, balance, autoloop)
-	if err != nil {
-		return nil, err
+	if m.params.SwapType == swap.TypeOut {
+		return m.loopOutSwap(ctx, amount, balance, autoloop)
 	}
 
-	return &loopOutSwapSuggestion{
-		OutRequest: *swap,
-	}, nil
+	return m.loopInSwap(ctx, amount, balance, autoloop)
 }
 
 // loopOutSwap creates a loop out swap with the amount provided for the balance
@@ -880,7 +920,7 @@ func (m *Manager) suggestSwap(ctx context.Context, traffic *swapTraffic,
 // can swap is returned. If this value is not ReasonNone, there is no possible
 // swap and the loop out request returned will be nil.
 func (m *Manager) loopOutSwap(ctx context.Context, amount btcutil.Amount,
-	balance *balances, autoloop bool) (*loop.OutRequest, error) {
+	balance *balances, autoloop bool) (*loopOutSwapSuggestion, error) {
 
 	quote, err := m.cfg.LoopOutQuote(
 		ctx, &loop.LoopOutQuoteRequest{
@@ -910,7 +950,43 @@ func (m *Manager) loopOutSwap(ctx context.Context, amount btcutil.Amount,
 		return nil, err
 	}
 
-	return &outRequest, nil
+	return &loopOutSwapSuggestion{
+		OutRequest: outRequest,
+	}, nil
+
+}
+
+func (m *Manager) loopInSwap(ctx context.Context, amount btcutil.Amount,
+	balance *balances, autoloop bool) (*loopInSwapSuggestion, error) {
+
+	quote, err := m.cfg.LoopInQuote(ctx, &loop.LoopInQuoteRequest{
+		Amount: amount,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := m.params.FeeLimit.loopInLimits(amount, quote); err != nil {
+		return nil, err
+	}
+
+	request := loop.LoopInRequest{
+		Amount:      amount,
+		MaxSwapFee:  quote.SwapFee,
+		MaxMinerFee: quote.MinerFee,
+		// TODO[carla]
+		HtlcConfTarget: 2,
+		LastHop:        &balance.pubkey,
+		Initiator:      autoloopSwapInitiator,
+	}
+
+	if autoloop {
+		request.Label = labels.AutoloopLabel(swap.TypeIn)
+	}
+
+	return &loopInSwapSuggestion{
+		LoopInRequest: request,
+	}, nil
 }
 
 // getSwapRestrictions queries the server for its latest swap size restrictions,

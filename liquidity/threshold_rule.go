@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/btcsuite/btcutil"
+	"github.com/lightninglabs/loop/swap"
 )
 
 var (
@@ -65,7 +66,7 @@ func (r *ThresholdRule) validate() error {
 // swapAmount suggests a swap based on the liquidity thresholds configured,
 // returning zero if no swap is recommended.
 func (r *ThresholdRule) swapAmount(channel *balances,
-	restrictions *Restrictions) btcutil.Amount {
+	restrictions *Restrictions, swapType swap.Type) btcutil.Amount {
 
 	// For loop out, we want to acquire liquidity in the incoming
 	// direction, so this is our target, while preserving some outgoing
@@ -76,6 +77,14 @@ func (r *ThresholdRule) swapAmount(channel *balances,
 		reserveBalance    = channel.outgoing
 		reservePercentage = uint64(r.MinimumOutgoing)
 	)
+
+	// For loop in swaps, we reverse our target and reserve values.
+	if swapType == swap.TypeIn {
+		targetBalance = channel.outgoing
+		targetPercentage = uint64(r.MinimumOutgoing)
+		reserveBalance = channel.incoming
+		reservePercentage = uint64(r.MinimumIncoming)
+	}
 
 	// Examine our total balance and required ratios to decide whether we
 	// need to swap.
