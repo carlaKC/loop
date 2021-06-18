@@ -101,7 +101,7 @@ var (
 	// defaultParameters contains the default parameters that we start our
 	// liquidity manger with.
 	defaultParameters = Parameters{
-		SwapType:        swap.TypeIn,
+		SwapType:        swap.TypeOut,
 		AutoFeeBudget:   defaultBudget,
 		MaxAutoInFlight: defaultMaxInFlight,
 		ChannelRules:    make(map[lnwire.ShortChannelID]*ThresholdRule),
