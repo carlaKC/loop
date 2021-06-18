@@ -735,6 +735,11 @@ message GetLiquidityParamsRequest {
 }
 
 message LiquidityParameters {
+    /* 
+    The type of swap that should be automatically executed. Defaults to loop
+    out.
+    */
+    SwapType swap_type = 17;
     /*
     A set of liquidity rules that describe the desired liquidity balance.
     */

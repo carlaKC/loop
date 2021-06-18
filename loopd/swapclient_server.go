@@ -592,6 +592,7 @@ func (s *swapClientServer) GetLiquidityParams(_ context.Context,
 	totalRules := len(cfg.ChannelRules) + len(cfg.PeerRules)
 
 	rpcCfg := &looprpc.LiquidityParameters{
+		SwapType:          looprpc.SwapType_LOOP_OUT,
 		SweepConfTarget:   cfg.SweepConfTarget,
 		FailureBackoffSec: uint64(cfg.FailureBackOff.Seconds()),
 		Autoloop:          cfg.Autoloop,
@@ -602,6 +603,10 @@ func (s *swapClientServer) GetLiquidityParams(_ context.Context,
 		),
 		MinSwapAmount: uint64(cfg.ClientRestrictions.Minimum),
 		MaxSwapAmount: uint64(cfg.ClientRestrictions.Maximum),
+	}
+
+	if cfg.SwapType == swap.TypeIn {
+		rpcCfg.SwapType = looprpc.SwapType_LOOP_IN
 	}
 
 	switch f := cfg.FeeLimit.(type) {
@@ -669,6 +674,7 @@ func (s *swapClientServer) SetLiquidityParams(ctx context.Context,
 	}
 
 	params := liquidity.Parameters{
+		SwapType:        swap.TypeOut,
 		FeeLimit:        feeLimit,
 		SweepConfTarget: in.Parameters.SweepConfTarget,
 		FailureBackOff: time.Duration(in.Parameters.FailureBackoffSec) *
@@ -686,6 +692,10 @@ func (s *swapClientServer) SetLiquidityParams(ctx context.Context,
 			Minimum: btcutil.Amount(in.Parameters.MinSwapAmount),
 			Maximum: btcutil.Amount(in.Parameters.MaxSwapAmount),
 		},
+	}
+
+	if in.Parameters.SwapType == looprpc.SwapType_LOOP_IN {
+		params.SwapType = swap.TypeIn
 	}
 
 	// Zero unix time is different to zero golang time.

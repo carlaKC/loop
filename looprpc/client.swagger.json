@@ -492,6 +492,10 @@
     "looprpcLiquidityParameters": {
       "type": "object",
       "properties": {
+        "swap_type": {
+          "$ref": "#/definitions/looprpcSwapType",
+          "description": "The type of swap that should be automatically executed. Defaults to loop\nout."
+        },
         "rules": {
           "type": "array",
           "items": {
